@@ -1558,7 +1558,7 @@ fn main() -> Result<()> {
 
     // 图 Schema 契约：不需要项目目录或图库，最先处理。
     if args.graph_schema {
-        if args.human {
+        if args.is_human() {
             print!("{}", metadata_checker::graph_schema::to_markdown());
         } else {
             println!(

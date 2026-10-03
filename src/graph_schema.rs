@@ -10,6 +10,16 @@
 //! 无条件构造的键（Action、Condition 的 `meta`）。S2 在启用写入校验前必须逐写入点
 //! 复核端点组合，不能直接把夹具观测当成穷举。
 //!
+//! 表的形状：每个节点类型有 id 文法、`meta` 键（名 + JSON 类型 + 是否可空 + 含义，`meta_open`
+//! 的行允许出现未列出的键）；每种边有端点组合、`field_path` 语义、`meta` 键、**产生它的写入路径与规则**
+//! （`producers`，测试核对引用的文件与函数还在）以及「缺席不代表没有」的情形。示例查询、标签与固有属性
+//! 也在表里，`--graph-schema` 的 JSON / Markdown 与 `--gql` help 都从同一份数据渲染。
+//!
+//! 核对范围：夹具图逐元素核对；设置了 `METADATA_CHECKER_REAL_PROJECT_DIR` 时对真实语料同样核对
+//! （夹具覆盖不到的分支只有真实语料能暴露）。页面局部 id（`model:<PAGE>|<local>`）只出现在
+//! ownership 绑定的 redb 图里，`.grafeo` 图（`--gql` 读的那张）目前看不到，所以那几种 id 形态
+//! 只按 `graph_identity.rs` 记录，没有被一致性测试核对。
+//!
 //! 与存储层版本无关：[`GRAPH_SCHEMA_CONTRACT_VERSION`] 描述本契约，不是 redb 的
 //! `fact_schema_version`；S3 引入图内新事实时才会递增。
 
@@ -21,13 +31,38 @@ use std::fmt::Write as _;
 /// 契约版本。S3（字段级血缘边）与 S4（诊断入图）会让它变成 2。
 pub const GRAPH_SCHEMA_CONTRACT_VERSION: u32 = 1;
 
+/// `meta` 值的 JSON 类型。`Any` 只用于确实多态的键（见各键描述）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MetaValueType {
+    String,
+    Bool,
+    Number,
+    Array,
+    Object,
+    Any,
+}
+
 /// `meta` 里的一个键。
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct MetaKeySchema {
     pub name: &'static str,
+    pub value_type: MetaValueType,
+    /// 值是否可以为 JSON `null`（键本身存在，值为空）。
+    pub nullable: bool,
     /// 写入点是否无条件写出该键。
     pub required: bool,
     pub description: &'static str,
+}
+
+impl MetaKeySchema {
+    /// 同一个键允许 `null` 值。
+    const fn nullable(self) -> Self {
+        Self {
+            nullable: true,
+            ..self
+        }
+    }
 }
 
 /// 边的起止节点类型组合。
@@ -45,6 +80,8 @@ pub enum FieldPathUse {
     Never,
     /// 总是设置。
     Always,
+    /// 取决于端点组合或写入分支，见 `field_path_meaning`。
+    Sometimes,
 }
 
 /// 节点类型的契约行。
@@ -58,7 +95,20 @@ pub struct NodeTypeSchema {
     /// `path` 属性的含义。
     pub path_meaning: &'static str,
     pub meta_keys: &'static [MetaKeySchema],
+    /// `meta` 是否开放：`true` 表示除已列出的键外还会出现别的键（例如表字段的 `meta` 是
+    /// `.tbl` 维度定义的原样拷贝），写入校验不得据此拒绝未列出的键。
+    pub meta_open: bool,
     pub notes: &'static str,
+}
+
+/// 产生某种边的一条写入路径。
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct Producer {
+    /// `src/` 之下的文件与函数，形如 `scanner/spg.rs::process_spg_file_from_value_with_identity`
+    /// （不写行号：行号会漂移；测试核对文件与函数名都还在）。
+    pub path: &'static str,
+    /// 该路径在什么条件下写出这种边。
+    pub rule: &'static str,
 }
 
 /// 边类型的契约行。
@@ -72,6 +122,8 @@ pub struct EdgeTypeSchema {
     pub field_path: FieldPathUse,
     pub field_path_meaning: &'static str,
     pub meta_keys: &'static [MetaKeySchema],
+    /// 产生这种边的写入路径与规则。会产生的边必须至少有一条。
+    pub producers: &'static [Producer],
     /// 这种边缺席时，「没有该关系」是否成立；不成立时写明原因。
     pub absent_when: &'static str,
 }
@@ -83,20 +135,62 @@ pub struct InterpretationRule {
     pub rule: &'static str,
 }
 
+/// 图库里的标签与固有属性（节点 / 边本身的列，不是 `meta` 里的键）。
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct GraphLabels {
+    /// 项目节点的标签。
+    pub project_node: &'static str,
+    pub node_properties: &'static [&'static str],
+    pub edge_properties: &'static [&'static str],
+    /// 图库里同时存在的内部记录标签，查询时不要碰。
+    pub internal_label: &'static str,
+}
+
+/// 一条示例查询。每条都由测试在夹具图上真实执行，保证示例不会过期。
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct QueryExample {
+    pub title: &'static str,
+    pub gql: &'static str,
+}
+
 /// 完整契约。
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct GraphSchema {
     pub contract_version: u32,
+    pub labels: GraphLabels,
     pub node_types: &'static [NodeTypeSchema],
     pub edge_types: &'static [EdgeTypeSchema],
     pub interpretation_rules: &'static [InterpretationRule],
+    pub examples: &'static [QueryExample],
     pub dialect_notes: &'static [&'static str],
 }
 
-const fn key(name: &'static str, required: bool, description: &'static str) -> MetaKeySchema {
+/// 可选键（写入点有条件地写出）。
+const fn opt(
+    name: &'static str,
+    value_type: MetaValueType,
+    description: &'static str,
+) -> MetaKeySchema {
     MetaKeySchema {
         name,
-        required,
+        value_type,
+        nullable: false,
+        required: false,
+        description,
+    }
+}
+
+/// 必需键（写入点无条件写出）。
+const fn req(
+    name: &'static str,
+    value_type: MetaValueType,
+    description: &'static str,
+) -> MetaKeySchema {
+    MetaKeySchema {
+        name,
+        value_type,
+        nullable: false,
+        required: true,
         description,
     }
 }
@@ -105,16 +199,23 @@ const fn pair(from: NodeType, to: NodeType) -> EndpointPair {
     EndpointPair { from, to }
 }
 
+const fn producer(path: &'static str, rule: &'static str) -> Producer {
+    Producer { path, rule }
+}
+
+use MetaValueType::{Any, Array, Bool, Number, Object, String as Str};
+
 // ---------------------------------------------------------------- 节点
 
 const NODE_TYPES: &[NodeTypeSchema] = &[
     NodeTypeSchema {
         node_type: NodeType::Page,
-        summary: "A SuperPage file (.spg).",
+        summary: "A SuperPage file (.spg), or a page that another page refers to.",
         id_prefixes: &["page"],
         id_formats: &["page:<project-relative path>"],
-        path_meaning: "The .spg path (a referenced page may carry an unresolved relative path such as app/../dir/x.spg).",
+        path_meaning: "The .spg path. A referenced page is created from the link target even when no file exists there, so a Page node with no Contains edge is a dangling reference, not a scanned page.",
         meta_keys: &[],
+        meta_open: false,
         notes: "No meta.",
     },
     NodeTypeSchema {
@@ -124,100 +225,101 @@ const NODE_TYPES: &[NodeTypeSchema] = &[
         id_formats: &["comp:<page path>|<component id>"],
         path_meaning: "The page path the component lives in.",
         meta_keys: &[
-            key("component_type", false, "The component's type string."),
-            key(
+            opt("component_type", Str, "The component's type string."),
+            opt(
                 "json_path",
-                false,
+                Str,
                 "Location of the component inside the page JSON.",
             ),
-            key(
+            opt(
                 "parent_id",
-                false,
+                Str,
                 "Id of the enclosing component; absent on the root.",
             ),
-            key(
+            opt(
                 "properties",
-                false,
+                Object,
                 "Object with the extracted properties (exp, value, visibleCondition, disableCondition, submitField, ...).",
             ),
-            key(
-                "dataSet",
-                false,
-                "Bound data set, on data-bound components.",
-            ),
-            key(
+            opt("dataSet", Str, "Bound data set, on data-bound components."),
+            opt(
                 "source",
-                false,
+                Str,
                 "Data source reference, on data-bound components.",
             ),
-            key(
+            opt(
                 "data_context_component_id",
-                false,
+                Str,
                 "Component that supplies the data context.",
             ),
-            key(
+            opt(
                 "data_context_dataSet",
-                false,
+                Str,
                 "Data set of that data context.",
             ),
-            key(
+            opt(
                 "data_context_json_path",
-                false,
+                Str,
                 "JSON path of that data context.",
             ),
-            key("data_context_source", false, "Source of that data context."),
+            opt("data_context_source", Str, "Source of that data context."),
         ],
-        notes: "Some components (for example the canvas root) have no meta.",
+        meta_open: false,
+        notes: "Some components (for example the canvas root, or a dialog that is only the target of a showDialog action) have no meta.",
     },
     NodeTypeSchema {
         node_type: NodeType::Model,
-        summary: "A data model: a physical table (.tbl), a dataflow node, or a model referenced by a page.",
+        summary: "A data model: a physical table (.tbl), a dataflow, a model referenced by a page, or an output table of a dataflow.",
         id_prefixes: &["model"],
-        id_formats: &["model:<name>"],
-        path_meaning: "The .tbl path. When the model could not be resolved to a file, path is a placeholder '<name>.tbl' and is not evidence that such a file exists.",
+        id_formats: &[
+            "model:<name>",
+            "model:<page path>|<local name> (ownership-bound graphs only; see notes)",
+        ],
+        path_meaning: "Depends on where the node came from: the .tbl file path for a scanned table; the .spg path for a dataflow embedded in a page; the path as declared by the referring file for a referenced table (for example $DATA:/dir/x.tbl or ../x.tbl, not resolved to a file); '<name>.tbl' for an output table or an unresolved model. A declared or placeholder path is not evidence that the file exists.",
         meta_keys: &[
-            key(
+            opt(
                 "modelType",
-                false,
-                "Model kind, for example dwtable, App, DataFlow.",
+                Str,
+                "Model kind: App or DataFlow (a scanned .tbl), PhysicalTable (output or referenced table), dwtable (a page source bound to a table), DataFlowDependency (listed in a dataflow's depends).",
             ),
-            key("sourcePath", false, "Declared table path."),
-            key(
+            opt("sourcePath", Str, "Declared table path."),
+            opt(
                 "dimensions",
-                false,
+                Array,
                 "Array of field definitions (name, dbfield, dataType, isDimension, length).",
             ),
-            key(
+            opt(
                 "embeddedIn",
-                false,
+                Str,
                 "Page name, on a dataflow embedded in a page.",
             ),
-            key("aliasMap", false, "Dataflow: alias to table mapping."),
-            key(
+            opt("aliasMap", Object, "Dataflow: alias to table mapping."),
+            opt(
                 "internalDeps",
-                false,
+                Object,
                 "Dataflow: dependencies between internal nodes.",
             ),
-            key("nodeFields", false, "Dataflow: fields per internal node."),
-            key("nodeFilters", false, "Dataflow: filters per internal node."),
-            key(
+            opt("nodeFields", Object, "Dataflow: fields per internal node."),
+            opt("nodeFilters", Object, "Dataflow: filters per internal node."),
+            opt(
                 "nodeJoinConditions",
-                false,
+                Object,
                 "Dataflow: join conditions per internal node.",
             ),
-            key(
+            opt(
                 "nodeTablePaths",
-                false,
+                Object,
                 "Dataflow: table path per internal node.",
             ),
-            key("nodeTypes", false, "Dataflow: type per internal node."),
-            key(
+            opt("nodeTypes", Object, "Dataflow: type per internal node."),
+            opt(
                 "nodeUnionMaps",
-                false,
+                Object,
                 "Dataflow: union mappings per internal node.",
             ),
         ],
-        notes: "Several pages may mention the same model name; they share one node (model:<name>).",
+        meta_open: false,
+        notes: "In the .grafeo graph that --gql reads, model names are global: a page source called model1 on two pages collapses into one node model:model1, and a page source named like a table is the same node as the table. Ownership-bound graphs (redb with a project binding) instead give page-local models the id model:<page path>|<local name>; ownership scanning is not wired for Grafeo, so GQL does not see that form today.",
     },
     NodeTypeSchema {
         node_type: NodeType::Field,
@@ -225,49 +327,97 @@ const NODE_TYPES: &[NodeTypeSchema] = &[
         id_prefixes: &["field", "param", "user", "system"],
         id_formats: &[
             "field:<model>.<field>",
+            "field:<model>.* (stands for all fields of the model; target of loadData-style writes)",
+            "field:<page path>|<model>.<field> (ownership-bound graphs only; see the Model notes)",
             "param:<page path>|<param name>",
             "param:<page name>/<param name> (parameter of a referenced page)",
             "user:user.<NAME>",
             "system:<name>",
         ],
-        path_meaning: "The .tbl path for field:, the page path for param:, and 'system' for user: and system:.",
+        path_meaning: "The path of the model the field belongs to (the .tbl path for field:, or the .spg path for a field of a dataflow embedded in a page), the page path for param:, and 'system' for user: and system:.",
         meta_keys: &[
-            key(
+            opt(
                 "kind",
-                false,
-                "param | user_property | system_var on non-table symbols.",
+                Str,
+                "param | user_property | system_var on non-table symbols; implicit on the model's totalRowCount__ field.",
             ),
-            key("name", false, "Display name of a table field."),
-            key("dataType", false, "Field data type."),
-            key("dbfield", false, "Physical column name."),
-            key("isDimension", false, "Whether the field is a dimension."),
-            key("length", false, "Declared length."),
-            key("description", false, "Field description."),
-            key("inputField", false, "Dataflow: upstream input field."),
-            key(
+            opt("name", Str, "Display name of a table field."),
+            opt("dataType", Str, "Field data type."),
+            opt("dbfield", Str, "Physical column name."),
+            opt("isDimension", Bool, "Whether the field is a dimension."),
+            opt("length", Number, "Declared length."),
+            opt("description", Str, "Field description."),
+            opt("inputField", Str, "Dataflow: upstream input field."),
+            opt(
                 "source_input_field",
-                false,
+                Str,
                 "Dataflow: upstream input field (source form).",
             ),
-            key(
+            opt(
                 "originalField",
-                false,
+                Str,
                 "Dataflow: original field behind an alias.",
             ),
-            key(
+            opt(
                 "originalNode",
-                false,
+                Str,
                 "Dataflow: node the original field belongs to.",
             ),
-            key("exp", false, "Dataflow: computed-field expression."),
-            key(
+            opt("exp", Str, "Dataflow: computed-field expression."),
+            opt(
                 "source_expr",
-                false,
+                Str,
                 "Dataflow: expression text the field came from.",
             ),
-            key("dimensionPath", false, "Dataflow: dimension path."),
+            opt(
+                "source_expr_models",
+                Array,
+                "Names of the models the expression refers to (strings), when it refers to any.",
+            ),
+            opt("dimensionPath", Str, "Dataflow: dimension path."),
+            opt(
+                "businessDesc",
+                Str,
+                "Business description written on the field definition.",
+            ),
+            opt("fieldRole", Str, "Role of the field as authored."),
+            opt("hidden", Bool, "Field is hidden, as authored."),
+            opt("isPrimaryKey", Bool, "Field is a primary key, as authored."),
+            opt("defaultValueExp", Str, "Default-value expression, as authored."),
+            opt("aggType", Str, "Aggregation type, as authored."),
+            opt("isAggFun", Bool, "Whether the field is an aggregate, as authored."),
+            opt("periodType", Str, "Period type, as authored."),
+            opt("dateFormat", Str, "Date format, as authored."),
+            opt("dateKeyValueFormat", Str, "Date key/value format, as authored."),
+            opt("displayFormat", Str, "Display format, as authored."),
+            opt("displayDimension", Str, "Display dimension, as authored."),
+            opt("textField", Str, "Text field, as authored."),
+            opt("decimal", Number, "Decimal places, as authored."),
+            opt("precision", Number, "Precision, as authored."),
+            opt("geoType", Str, "Geo type, as authored."),
+            opt("extractable", Bool, "Extractable flag, as authored."),
+            opt("isAutoInc", Bool, "Auto-increment flag, as authored."),
+            opt("newborn", Bool, "Newborn flag, as authored."),
+            opt(
+                "isOriginalFieldInvalid",
+                Bool,
+                "Whether the original field is invalid, as authored.",
+            ),
+            opt("fileModifyTimeField", Str, "File modify-time field, as authored."),
+            opt(
+                "fieldStorageInfo",
+                Object,
+                "Storage details of the field, as authored.",
+            ),
+            opt(
+                "modifiedInfo",
+                Object,
+                "Modification details of the field, as authored.",
+            ),
+            opt("labels", Array, "Labels on the field, as authored."),
         ],
-        notes: "field:<model>.* stands for 'all fields of the model'. Most table fields have no meta.",
+        meta_open: true,
+        notes: "For a table field, meta is a copy of the field's dimension definition in the .tbl, plus the source_* keys the scanner adds, so keys other than the ones listed can occur: the platform adds dimension properties over time. field:<model>.* stands for 'all fields of the model'. Most table fields have no meta.",
     },
     NodeTypeSchema {
         node_type: NodeType::Action,
@@ -276,84 +426,99 @@ const NODE_TYPES: &[NodeTypeSchema] = &[
         id_formats: &["action:<page path>|<component id>|<action id>"],
         path_meaning: "The page path the action lives in.",
         meta_keys: &[
-            key(
+            req(
                 "triggerType",
-                true,
-                "Event that fires the action, for example click.",
+                Str,
+                "Event that fires the action, for example click; may be an empty string.",
             ),
-            key("condition", true, "Raw condition value, or null."),
-            key("conditionExp", true, "Condition expression, or null."),
-            key(
+            req(
+                "condition",
+                Any,
+                "Raw condition value as authored, or null (null on every action seen so far).",
+            )
+            .nullable(),
+            req("conditionExp", Str, "Condition expression, or null.").nullable(),
+            req(
                 "waitPrev",
-                true,
-                "Whether the action waits for the previous one, or null.",
-            ),
+                Str,
+                "Which earlier action this one waits for: 'nowait' or a '<component>.<action>' reference; null when not set.",
+            )
+            .nullable(),
         ],
-        notes: "The action's own type (submitData, link, ...) is not stored in meta; it shows in the edges the action has (see each Action* edge type) and in the node name.",
+        meta_open: false,
+        notes: "The action's own type (submitData, link, ...) is not stored in meta; it shows in the edges the action has (see each Action* edge type) and in the node name (<actionType>:<action id>).",
     },
     NodeTypeSchema {
         node_type: NodeType::Condition,
-        summary: "An expression with a semantic role: a component's exp / visibleCondition / disableCondition, an action's conditionExp, or a model filter clause.",
+        summary: "An expression with a semantic role: a component's exp / visibleCondition / disableCondition, an action's condition or conditionExp, or a model filter clause.",
         id_prefixes: &["cond"],
         id_formats: &[
-            "cond:<page path>|<owner id>#<field>#<n>",
-            "cond:<page path>|<component>#<action>#conditionExp",
+            "cond:<page path>|<component id>#<property>#<n> (component expression; n is the occurrence index)",
+            "cond:<page path>|<component id>#<action id>#conditionExp (action conditionExp)",
+            "cond:<page path>|<component id>#<action id>#condition (action condition)",
+            "cond:<page path>|<source id>#filter#<n>#exp (model filter expression)",
+            "cond:<page path>|<source id>#filter#<n>#clause (model filter clause)",
         ],
         path_meaning: "The page path the condition lives in.",
         meta_keys: &[
-            key(
+            req(
                 "condition_type",
-                true,
-                "What kind of expression this is (for example FieldExp, Visible).",
+                Str,
+                "What kind of expression this is (for example FieldExp, VisibleCondition, SourceFilterExp).",
             ),
-            key(
+            req(
                 "effect_type",
-                true,
-                "What the expression controls (for example Compute).",
+                Str,
+                "What the expression controls (for example Compute, Show, Filter).",
             ),
-            key("subject_type", true, "Type of the owner."),
-            key("raw_expr", true, "The expression as written."),
-            key(
+            req("subject_type", Str, "Type of the owner."),
+            req("raw_expr", Str, "The expression as written."),
+            req(
                 "normalized_expr",
-                true,
+                Str,
                 "The expression after symbol normalisation.",
             ),
-            key("json_path", true, "Location inside the page JSON."),
-            key("owner_type", true, "Type of the owner."),
-            key("owner_id", true, "Id of the owner within the page."),
-            key(
+            req("json_path", Str, "Location inside the page JSON."),
+            req("owner_type", Str, "Type of the owner."),
+            req("owner_id", Str, "Id of the owner within the page."),
+            req(
                 "referenced_symbols",
-                true,
+                Array,
                 "Array of symbols (model:..., component:..., param:...) the expression references.",
             ),
         ],
+        meta_open: false,
         notes: "Model filter clauses are Condition nodes owned by the model (json_path starts with sources[...].filter); read raw_expr for the filter fields.",
     },
 ];
 
 // ---------------------------------------------------------------- 边
 
-/// 由组件 / action 产生的边共有的来源键。
+/// SPG 页面写图的总入口：几乎所有页面侧的边都从这里产生。
+const SPG: &str = "scanner/spg.rs::process_spg_file_from_value_with_identity";
+/// 表达式里的模型字段读取最终经由这个函数落边。
+const SPG_READ: &str = "scanner/spg.rs::add_model_read_with_scope";
+/// 模型字段写入（含 action 的 validate / load）最终经由这个函数落边。
+const SPG_WRITE: &str = "scanner/spg.rs::add_model_write_with_scope";
+const TBL: &str = "scanner/tbl.rs::process_tbl_file_from_string";
+
+/// 由组件产生的边共有的来源键。
 const ACTOR_KEYS_COMPONENT: &[MetaKeySchema] = &[
-    key("actor_kind", false, "component | action | condition."),
-    key("actor_id", false, "Id of the actor within its page."),
-    key(
-        "operation",
-        false,
-        "The edge type name, or Conditions for a condition-to-owner edge.",
-    ),
-    key(
+    opt("actor_kind", Str, "component."),
+    opt("actor_id", Str, "Id of the component within its page."),
+    opt("operation", Str, "The edge type name."),
+    opt(
         "reason",
-        false,
+        Str,
         "Human-readable sentence describing why the edge exists.",
     ),
-    key(
+    opt(
         "source_expr",
-        false,
+        Str,
         "Expression text the edge was derived from.",
     ),
-    key("target_model", false, "Model the edge refers to."),
-    key("target_field", false, "Field the edge refers to."),
+    opt("target_model", Str, "Model the edge refers to."),
+    opt("target_field", Str, "Field the edge refers to."),
 ];
 
 const NO_META: &[MetaKeySchema] = &[];
@@ -371,6 +536,24 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
         field_path: FieldPathUse::Never,
         field_path_meaning: "Not set.",
         meta_keys: NO_META,
+        producers: &[
+            producer(
+                SPG,
+                "Second pass over the page's components: page -> every component, and parent component -> nested component (one Component parent each).",
+            ),
+            producer(
+                SPG,
+                "A dataflow embedded in the page: model -> each of its dimension fields; a model with a filter also contains the implicit field totalRowCount__.",
+            ),
+            producer(
+                "scanner/spg.rs::ensure_model_field_with_scope",
+                "Every model.field a page expression touches: model -> field.",
+            ),
+            producer(
+                TBL,
+                "A .tbl: model -> each dimension field; the output table (dbTableName) also contains the same dimension fields.",
+            ),
+        ],
         absent_when: "Complete for what the scanner parsed.",
     },
     EdgeTypeSchema {
@@ -381,6 +564,10 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
         field_path: FieldPathUse::Never,
         field_path_meaning: "Not set.",
         meta_keys: NO_META,
+        producers: &[producer(
+            SPG,
+            "Actions pass: every action of every component gets component -> action.",
+        )],
         absent_when: "Complete for what the scanner parsed.",
     },
     EdgeTypeSchema {
@@ -394,46 +581,56 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
         field_path: FieldPathUse::Always,
         field_path_meaning: "<model>.<field> that is read.",
         meta_keys: &[
-            key("actor_kind", false, "component."),
-            key("actor_id", false, "Component id."),
-            key("operation", false, "Reads."),
-            key("reason", false, "Why the edge exists."),
-            key(
+            opt("actor_kind", Str, "component."),
+            opt("actor_id", Str, "Component id."),
+            opt("operation", Str, "Reads."),
+            opt("reason", Str, "Why the edge exists."),
+            opt(
                 "json_path",
-                false,
+                Str,
                 "Where in the page JSON the expression is.",
             ),
-            key("source_expr", false, "The expression text."),
-            key(
+            opt("source_expr", Str, "The expression text."),
+            opt(
                 "source_field",
-                false,
+                Str,
                 "The property holding the expression (exp, value, ...).",
             ),
-            key("target_model", false, "Model read."),
-            key("target_field", false, "Field read."),
-            key(
+            opt("target_model", Str, "Model read."),
+            opt("target_field", Str, "Field read."),
+            opt(
                 "bare_symbol",
-                false,
+                Str,
                 "Set when the reference had no model prefix and was resolved through the data context.",
             ),
-            key("resolution", false, "How a bare symbol was resolved."),
-            key("target_model_path", false, "Path of the resolved model."),
-            key(
+            opt("resolution", Str, "How a bare symbol was resolved."),
+            opt("target_model_path", Str, "Path of the resolved model."),
+            opt(
                 "data_context_component_id",
-                false,
+                Str,
                 "Data-context component used for resolution.",
             ),
-            key(
-                "data_context_dataSet",
-                false,
-                "Data set used for resolution.",
-            ),
-            key(
+            opt("data_context_dataSet", Str, "Data set used for resolution."),
+            opt(
                 "data_context_json_path",
-                false,
+                Str,
                 "JSON path used for resolution.",
             ),
-            key("data_context_source", false, "Source used for resolution."),
+            opt("data_context_source", Str, "Source used for resolution.").nullable(),
+        ],
+        producers: &[
+            producer(
+                SPG,
+                "A component expression (exp, value, visibleCondition, ...) that references model.field, through add_model_read_with_scope.",
+            ),
+            producer(
+                SPG_READ,
+                "Writes the Component -> Model edge and, when the field name is known, the Component -> Field edge; a local model whose source maps to a physical table gets the same pair again on the physical table.",
+            ),
+            producer(
+                SPG,
+                "A bare symbol in a component's value that is not a model, component or parameter, inside an inherited data context: resolved against the context's data set.",
+            ),
         ],
         absent_when: "A component whose expressions reference no model or field has no Reads edge. A component bound through a data context may only show a Reads edge with a bare_symbol resolution.",
     },
@@ -445,32 +642,48 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
         field_path: FieldPathUse::Always,
         field_path_meaning: "<model>.<field> that is written.",
         meta_keys: ACTOR_KEYS_COMPONENT,
+        producers: &[producer(
+            SPG,
+            "A component with properties.submitField of the form model.field: Component -> Model through add_model_write_with_scope (which also adds the field-level FieldWrite edge).",
+        )],
         absent_when: "Only components with a submitField produce it.",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::FieldWrite,
-        summary: "Field-level write: a component (via submitField) or an action writes a specific field. Usually accompanies Writes / ActionWrites, which point at the model.",
+        summary: "Field-level edge written next to a model-level one by the same actor: a component's submitField, or an action. Despite the name it is not always a write: meta.operation says which (Writes, ActionWrites, ActionValidates, ActionLoadsData).",
         emitted: true,
         endpoints: &[
             pair(NodeType::Action, NodeType::Field),
             pair(NodeType::Component, NodeType::Field),
         ],
         field_path: FieldPathUse::Always,
-        field_path_meaning: "<model>.<field> that is written.",
+        field_path_meaning: "<model>.<field> that is written, validated or loaded; <model>.* for ActionLoadsData.",
         meta_keys: &[
-            key("actor_kind", false, "component | action."),
-            key("actor_id", false, "Id of the writer."),
-            key("operation", false, "Writes."),
-            key("reason", false, "Why the edge exists."),
-            key("trigger", false, "Action trigger, on action writers."),
-            key(
+            opt("actor_kind", Str, "component | action."),
+            opt("actor_id", Str, "Id of the actor."),
+            opt(
+                "operation",
+                Str,
+                "Writes (component submitField), ActionWrites, ActionValidates or ActionLoadsData: the model-level edge type written next to this one. Filter on it before calling the edge a write.",
+            ),
+            opt("reason", Str, "Why the edge exists."),
+            opt("trigger", Str, "Action trigger, on action actors."),
+            opt(
                 "source_expr",
-                false,
+                Str,
                 "Value expression, when the write has one.",
             ),
-            key("target_model", false, "Model written."),
-            key("target_field", false, "Field written, when known."),
+            opt("target_model", Str, "Model written."),
+            opt(
+                "target_field",
+                Str,
+                "Field written; absent on ActionLoadsData.",
+            ),
         ],
+        producers: &[producer(
+            SPG_WRITE,
+            "Called for every model-level Writes / ActionWrites / ActionValidates / ActionLoadsData edge; when the field name is non-empty it adds Actor -> Field with the same meta, on the local model and again on the physical table.",
+        )],
         absent_when: "A write whose field cannot be resolved has only the model-level edge.",
     },
     EdgeTypeSchema {
@@ -481,14 +694,24 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
         field_path: FieldPathUse::Always,
         field_path_meaning: "<model>.<field> that is written.",
         meta_keys: &[
-            key("actor_kind", false, "action."),
-            key("actor_id", false, "Action id."),
-            key("operation", false, "ActionWrites."),
-            key("trigger", false, "Event that fires the action."),
-            key("reason", false, "Why the edge exists."),
-            key("source_expr", false, "Value expression."),
-            key("target_model", false, "Model written."),
-            key("target_field", false, "Field written."),
+            opt("actor_kind", Str, "action."),
+            opt("actor_id", Str, "Action id."),
+            opt("operation", Str, "ActionWrites."),
+            opt("trigger", Str, "Event that fires the action."),
+            opt("reason", Str, "Why the edge exists."),
+            opt("source_expr", Str, "Value expression."),
+            opt("target_model", Str, "Model written."),
+            opt("target_field", Str, "Field written."),
+        ],
+        producers: &[
+            producer(
+                SPG,
+                "submitData: for each component in the submit range that has a submitField, one edge per model.field.",
+            ),
+            producer(
+                SPG,
+                "updateData / insertData / deleteData: one edge per configured field value of the action's data set.",
+            ),
         ],
         absent_when: "Action types that write nothing have no such edge.",
     },
@@ -503,14 +726,28 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
         field_path: FieldPathUse::Always,
         field_path_meaning: "<model>.<field> that is read.",
         meta_keys: &[
-            key("actor_kind", false, "action."),
-            key("actor_id", false, "Action id."),
-            key("operation", false, "Reads."),
-            key("trigger", false, "Event that fires the action."),
-            key("reason", false, "Why the edge exists."),
-            key("source_expr", false, "Expression text."),
-            key("target_model", false, "Model read."),
-            key("target_field", false, "Field read."),
+            opt("actor_kind", Str, "action."),
+            opt("actor_id", Str, "Action id."),
+            opt("operation", Str, "Reads."),
+            opt("trigger", Str, "Event that fires the action."),
+            opt("reason", Str, "Why the edge exists."),
+            opt("source_expr", Str, "Expression text."),
+            opt("target_model", Str, "Model read."),
+            opt("target_field", Str, "Field read."),
+        ],
+        producers: &[
+            producer(
+                SPG,
+                "An expression-valued field of an insertData / updateData / deleteData action that references model.field.",
+            ),
+            producer(
+                SPG,
+                "A link(app) action's data entries: expressions in parameter values.",
+            ),
+            producer(
+                SPG,
+                "A setParamValue action's params: expressions in parameter values.",
+            ),
         ],
         absent_when: "Only expressions that reference a model or field produce it.",
     },
@@ -520,16 +757,20 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
         emitted: true,
         endpoints: &[pair(NodeType::Action, NodeType::Page)],
         field_path: FieldPathUse::Always,
-        field_path_meaning: "Path of the target page as written (may contain ../).",
+        field_path_meaning: "Project-relative path of the target page.",
         meta_keys: &[
-            key("actor_kind", false, "action."),
-            key("actor_id", false, "Action id."),
-            key("operation", false, "ActionNavigates."),
-            key("trigger", false, "Event that fires the action."),
-            key("reason", false, "Why the edge exists."),
-            key("target_model", false, "Target page name."),
+            opt("actor_kind", Str, "action."),
+            opt("actor_id", Str, "Action id."),
+            opt("operation", Str, "ActionNavigates."),
+            opt("trigger", Str, "Event that fires the action."),
+            opt("reason", Str, "Why the edge exists."),
+            opt("target_model", Str, "Target page name."),
         ],
-        absent_when: "A link whose target page cannot be resolved produces no edge here; the query layer reports it as UNRESOLVED_PAGE_NAVIGATION. Absence is not proof there is no navigation.",
+        producers: &[producer(
+            SPG,
+            "A link action with targetType app whose path is an index into referenceResources that resolves to a .spg page path: the target Page node is upserted, then Action -> Page.",
+        )],
+        absent_when: "A link whose target cannot be resolved to a page path (index out of range, an absolute path, a URI, an unknown $-prefix, a target that is not .spg) produces no edge and no Page node, and nothing in the graph marks the gap. A link whose path resolves but whose file does not exist still produces the edge, to a Page node with no Contains edge. Absence is not proof there is no navigation. The query-time diagnostic UNRESOLVED_PAGE_NAVIGATION only fires for a target node that is missing from the graph, which this scanner never leaves, so it does not cover either case.",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::PassesParam,
@@ -539,15 +780,19 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
         field_path: FieldPathUse::Always,
         field_path_meaning: "The value expression being passed (for example =model1.fieldA), not a model.field path.",
         meta_keys: &[
-            key("actor_kind", false, "action."),
-            key("actor_id", false, "Action id."),
-            key("operation", false, "PassesParam."),
-            key("trigger", false, "Event that fires the action."),
-            key("reason", false, "Why the edge exists."),
-            key("target_field", false, "Parameter name."),
-            key("source_expr", false, "Value expression."),
+            opt("actor_kind", Str, "action."),
+            opt("actor_id", Str, "Action id."),
+            opt("operation", Str, "PassesParam."),
+            opt("trigger", Str, "Event that fires the action."),
+            opt("reason", Str, "Why the edge exists."),
+            opt("target_field", Str, "Parameter name."),
+            opt("source_expr", Str, "Value expression."),
         ],
-        absent_when: "Only link actions that carry parameters produce it.",
+        producers: &[producer(
+            SPG,
+            "A link(app) action with a resolved target page: one Action -> param:<page name>/<param> edge per data entry.",
+        )],
+        absent_when: "Only link actions that carry parameters and whose target resolves produce it.",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::ActionSetsParam,
@@ -557,14 +802,18 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
         field_path: FieldPathUse::Always,
         field_path_meaning: "The value expression being assigned (for example =model1.fieldB).",
         meta_keys: &[
-            key("actor_kind", false, "action."),
-            key("actor_id", false, "Action id."),
-            key("operation", false, "ActionSetsParam."),
-            key("trigger", false, "Event that fires the action."),
-            key("reason", false, "Why the edge exists."),
-            key("target_field", false, "Parameter name."),
-            key("source_expr", false, "Value expression."),
+            opt("actor_kind", Str, "action."),
+            opt("actor_id", Str, "Action id."),
+            opt("operation", Str, "ActionSetsParam."),
+            opt("trigger", Str, "Event that fires the action."),
+            opt("reason", Str, "Why the edge exists."),
+            opt("target_field", Str, "Parameter name."),
+            opt("source_expr", Str, "Value expression."),
         ],
+        producers: &[producer(
+            SPG,
+            "A setParamValue action: one Action -> param:<page path>|<param> edge per entry of the action's params.",
+        )],
         absent_when: "Only setParamValue actions produce it.",
     },
     EdgeTypeSchema {
@@ -575,18 +824,35 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
         field_path: FieldPathUse::Never,
         field_path_meaning: "Not set.",
         meta_keys: &[
-            key("actor_kind", false, "action."),
-            key("actor_id", false, "Action id."),
-            key("operation", false, "ActionControlsComponent."),
-            key("trigger", false, "Event that fires the action."),
-            key(
+            opt("actor_kind", Str, "action."),
+            opt("actor_id", Str, "Action id."),
+            opt("operation", Str, "ActionControlsComponent."),
+            opt("trigger", Str, "Event that fires the action."),
+            opt(
                 "reason",
-                false,
+                Str,
                 "Says whether it opens, closes, shows, hides or switches.",
             ),
-            key("dialog", false, "Dialog id, for dialog actions."),
-            key("panel", false, "Panel id, for panel switches."),
-            key("panelbook", false, "Panel book id, for panel switches."),
+            opt(
+                "target_component",
+                Str,
+                "Id of the component shown or hidden, on showComponent / hideComponent.",
+            ),
+            opt("dialog", Str, "Dialog id, for showDialog."),
+            opt("panel", Str, "Panel id, for switchPanel; null when unset.").nullable(),
+            opt("panelbook", Str, "Panel book id, for switchPanel."),
+        ],
+        producers: &[
+            producer(
+                SPG,
+                "showComponent / hideComponent: one edge per entry of the action's target components.",
+            ),
+            producer(SPG, "showDialog: the dialog component named by the action."),
+            producer(
+                SPG,
+                "closeDialog: points at the component the action sits on (the dialog being closed).",
+            ),
+            producer(SPG, "switchPanel: the action's panel book."),
         ],
         absent_when: "Only UI-control action types produce it.",
     },
@@ -598,31 +864,57 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
         field_path: FieldPathUse::Always,
         field_path_meaning: "<model>.<field> that is validated.",
         meta_keys: &[
-            key("actor_kind", false, "action."),
-            key("actor_id", false, "Action id."),
-            key("operation", false, "ActionValidates."),
-            key("trigger", false, "Event that fires the action."),
-            key("reason", false, "Why the edge exists."),
-            key("source_expr", false, "Expression text."),
-            key("target_model", false, "Model validated."),
-            key("target_field", false, "Field validated."),
+            opt("actor_kind", Str, "action."),
+            opt("actor_id", Str, "Action id."),
+            opt("operation", Str, "ActionValidates."),
+            opt("trigger", Str, "Event that fires the action."),
+            opt("reason", Str, "Why the edge exists."),
+            opt("source_expr", Str, "Expression text."),
+            opt("target_model", Str, "Model validated."),
+            opt("target_field", Str, "Field validated."),
         ],
-        absent_when: "Only validateData actions produce it.",
+        producers: &[producer(
+            SPG,
+            "validateData: for each component in the validate range that has a submitField, one edge per model.field (through add_model_write_with_scope, so a FieldWrite edge with operation ActionValidates comes with it).",
+        )],
+        absent_when: "Only validateData actions over components with a submitField produce it.",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::ActionLoadsData,
-        summary: "A loadData / resetData style action loads or resets a model.",
+        summary: "A loadData / resetData style action loads or resets a model, or the components it names.",
         emitted: true,
-        endpoints: &[pair(NodeType::Action, NodeType::Model)],
-        field_path: FieldPathUse::Always,
-        field_path_meaning: "<model>.* (the whole model).",
+        endpoints: &[
+            pair(NodeType::Action, NodeType::Model),
+            pair(NodeType::Action, NodeType::Component),
+        ],
+        field_path: FieldPathUse::Sometimes,
+        field_path_meaning: "Action -> Model: <model>.* (the whole model). Action -> Component: not set.",
         meta_keys: &[
-            key("actor_kind", false, "action."),
-            key("actor_id", false, "Action id."),
-            key("operation", false, "ActionLoadsData."),
-            key("trigger", false, "Event that fires the action."),
-            key("reason", false, "Why the edge exists."),
-            key("target_model", false, "Model loaded."),
+            opt("actor_kind", Str, "action."),
+            opt("actor_id", Str, "Action id."),
+            opt("operation", Str, "ActionLoadsData."),
+            opt("trigger", Str, "Event that fires the action."),
+            opt("reason", Str, "Why the edge exists."),
+            opt(
+                "target_model",
+                Str,
+                "Model loaded, on Action -> Model edges.",
+            ),
+            opt(
+                "target_component",
+                Str,
+                "Component loaded or reset, on Action -> Component edges.",
+            ),
+        ],
+        producers: &[
+            producer(
+                SPG,
+                "resetData / newData / refreshModels / refreshData / loadData with a data set, or with components whose submitField names a model: Action -> Model with field <model>.* (through add_model_write_with_scope, so a FieldWrite edge to field:<model>.* with operation ActionLoadsData comes with it).",
+            ),
+            producer(
+                SPG,
+                "The same action types with only submit components that carry no submitField: Action -> each named Component, no field_path.",
+            ),
         ],
         absent_when: "Only load / reset / refresh action types produce it.",
     },
@@ -632,13 +924,17 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
         emitted: true,
         endpoints: &[pair(NodeType::Component, NodeType::Page)],
         field_path: FieldPathUse::Always,
-        field_path_meaning: "Path of the embedded page as written (may contain ../).",
+        field_path_meaning: "Project-relative path of the embedded page.",
         meta_keys: NO_META,
-        absent_when: "An embed whose target cannot be resolved produces no edge.",
+        producers: &[producer(
+            SPG,
+            "An embedsuperpage component whose resPath is an index into referenceResources that resolves to a .spg page path: the target Page node is upserted, then Component -> Page.",
+        )],
+        absent_when: "An embed whose target cannot be resolved produces no edge and nothing in the graph marks the gap; one whose path resolves but whose file does not exist produces the edge to a Page node with no Contains edge.",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::DependsOn,
-        summary: "Overloaded edge. operation = DependsOn: an expression depends on an upstream symbol (component value, parameter, user property, system variable, model field). operation = Conditions: a Condition node points at the owner it belongs to (Condition -> owner).",
+        summary: "Overloaded edge. operation = DependsOn: an expression depends on an upstream symbol (component value or property, parameter, user property, system variable, model field). operation = Conditions: a Condition node points at the owner it belongs to (Condition -> owner).",
         emitted: true,
         endpoints: &[
             pair(NodeType::Component, NodeType::Component),
@@ -649,67 +945,118 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
             pair(NodeType::Condition, NodeType::Model),
         ],
         field_path: FieldPathUse::Always,
-        field_path_meaning: "For operation = DependsOn: the referenced symbol (for example comp:input2.value, param:param1). For operation = Conditions: the json_path of the condition.",
+        field_path_meaning: "For operation = DependsOn: the referenced symbol (for example comp:input2.value, param:param1, $user.id). For operation = Conditions: the json_path of the condition.",
         meta_keys: &[
-            key("actor_kind", false, "component | condition."),
-            key("actor_id", false, "Component id or condition id."),
-            key("operation", false, "DependsOn or Conditions."),
-            key(
+            opt("actor_kind", Str, "component | condition."),
+            opt("actor_id", Str, "Component id or condition id."),
+            opt("operation", Str, "DependsOn or Conditions."),
+            opt(
                 "reason",
-                false,
+                Str,
                 "Says whether the condition belongs to its owner or depends on a symbol.",
             ),
-            key("json_path", false, "Location inside the page JSON."),
-            key("source_expr", false, "Expression text."),
-            key(
+            opt("json_path", Str, "Location inside the page JSON."),
+            opt("source_expr", Str, "Expression text."),
+            opt(
                 "source_field",
-                false,
-                "Property holding the expression (visibleCondition, exp, ...).",
+                Str,
+                "Property holding the expression (visibleCondition, exp, ...), on component edges.",
             ),
-            key(
+            opt(
                 "source_file",
-                false,
-                "File of the referenced symbol, for cross-file references.",
+                Str,
+                "Page of the referring component, on component -> component edges.",
             ),
-            key("target_component", false, "Referenced component id."),
-            key("target_param", false, "Referenced parameter name."),
-            key(
+            opt("target_component", Str, "Referenced component id."),
+            opt(
+                "target_property",
+                Str,
+                "Property of the referenced component, when the reference names one.",
+            ),
+            opt("target_param", Str, "Referenced parameter name."),
+            opt(
+                "target_user_property",
+                Str,
+                "Referenced user property name, on component -> user: edges.",
+            ),
+            opt(
+                "target_system_var",
+                Str,
+                "Referenced system variable name, on component -> system: edges.",
+            ),
+            opt(
                 "condition_type",
-                false,
-                "On condition edges: the condition kind.",
+                Str,
+                "On condition -> owner edges: the condition kind.",
+            ),
+        ],
+        producers: &[
+            producer(
+                SPG,
+                "A component expression that references another component (value or property), a parameter, a user property or a system variable: Component -> that symbol, operation DependsOn.",
+            ),
+            producer(
+                SPG,
+                "Every Condition node: Condition -> its owner (component, action or model source), operation Conditions.",
+            ),
+            producer(
+                SPG,
+                "Every symbol a Condition references (component, param, model, user, system): Condition -> that symbol, operation DependsOn.",
+            ),
+            producer(
+                SPG,
+                "A model source filter: Condition -> the model's implicit field totalRowCount__, operation DependsOn.",
             ),
         ],
         absent_when: "Only symbols the expression parser recognises (component, param, user, system, model field) produce edges; other text is not tracked.",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::DataflowInput,
-        summary: "Dataflow lineage: a model takes another model as input (Model -> its input model).",
+        summary: "Dataflow lineage: a model takes another model as input (Model -> its input model). Also the local-model-to-table link of a page source.",
         emitted: true,
         endpoints: &[pair(NodeType::Model, NodeType::Model)],
         field_path: FieldPathUse::Always,
-        field_path_meaning: "Path of the input table.",
+        field_path_meaning: "Path of the input table as written in the referring metadata.",
         meta_keys: NO_META,
+        producers: &[
+            producer(
+                TBL,
+                "A dataflow .tbl: each node's moduleTablePath, and each entry of properties.depends, becomes DataflowInput to that table's model.",
+            ),
+            producer(
+                SPG,
+                "A dataflow embedded in a page: each node's moduleTablePath. A dwtable page source: local model -> the physical table it is bound to.",
+            ),
+        ],
         absent_when: "Model-level only; field-level lineage is not stored (see FieldAlias and the --explain verb).",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::DataflowOutput,
-        summary: "Dataflow lineage: a model outputs to another model (Model -> its output model).",
+        summary: "Reverse of the page-source binding: a physical table points back at the local model bound to it.",
         emitted: true,
         endpoints: &[pair(NodeType::Model, NodeType::Model)],
         field_path: FieldPathUse::Always,
-        field_path_meaning: "Path of the output table.",
+        field_path_meaning: "Path of the table as declared by the page source.",
         meta_keys: NO_META,
-        absent_when: "Model-level only; field-level lineage is not stored.",
+        producers: &[producer(
+            SPG,
+            "A dwtable page source: physical table -> local model, written next to the DataflowInput in the other direction so a walk can go from the table back to the page source.",
+        )],
+        absent_when: "Only dwtable page sources produce it; a dataflow's own output is OutputsTo.",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::OutputsTo,
-        summary: "A dataflow table declares its output target. May point at the same model.",
+        summary: "A table declares its output table (dbTableName). May point at the same model.",
         emitted: true,
         endpoints: &[pair(NodeType::Model, NodeType::Model)],
         field_path: FieldPathUse::Always,
-        field_path_meaning: "Name of the output target.",
+        field_path_meaning: "Name of the output table.",
         meta_keys: NO_META,
-        absent_when: "Only dataflow tables with a declared output produce it.",
+        producers: &[producer(
+            TBL,
+            "A .tbl with a non-empty properties.dbTableName (App or DataFlow): model -> model:<dbTableName>.",
+        )],
+        absent_when: "A table without a dbTableName has no output table, and so no OutputsTo edge.",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::FieldAlias,
@@ -719,6 +1066,16 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
         field_path: FieldPathUse::Always,
         field_path_meaning: "<local model>.<field> on the alias side.",
         meta_keys: NO_META,
+        producers: &[
+            producer(
+                SPG_READ,
+                "A read through a local model whose source maps to a physical table: local field -> physical field, written next to the read edge.",
+            ),
+            producer(
+                SPG_WRITE,
+                "The same for writes, validations and loads through a local model.",
+            ),
+        ],
         absent_when: "Only fields whose local model maps to a resolvable physical table get an alias edge. This is the only stored field-to-field relation; multi-hop field lineage is computed at query time, not stored.",
     },
     EdgeTypeSchema {
@@ -729,6 +1086,7 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
         field_path: FieldPathUse::Never,
         field_path_meaning: "Not applicable.",
         meta_keys: NO_META,
+        producers: &[],
         absent_when: "Always absent; do not query it.",
     },
     EdgeTypeSchema {
@@ -739,6 +1097,7 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
         field_path: FieldPathUse::Never,
         field_path_meaning: "Not applicable.",
         meta_keys: NO_META,
+        producers: &[],
         absent_when: "Always absent; do not query it.",
     },
     EdgeTypeSchema {
@@ -749,6 +1108,7 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
         field_path: FieldPathUse::Never,
         field_path_meaning: "Not applicable.",
         meta_keys: NO_META,
+        producers: &[],
         absent_when: "Always absent; do not query it.",
     },
 ];
@@ -766,15 +1126,23 @@ const INTERPRETATION_RULES: &[InterpretationRule] = &[
     },
     InterpretationRule {
         id: "absent-edge-is-not-absent-relation",
-        rule: "A missing edge does not always mean the relation does not exist. Check the edge type's absent_when: unresolved navigation targets and unrecognised expression text produce no edge.",
+        rule: "A missing edge does not always mean the relation does not exist. Check the edge type's absent_when: unresolved navigation or embed targets and unrecognised expression text produce no edge.",
     },
     InterpretationRule {
-        id: "placeholder-model-path",
-        rule: "When a model was referenced but never resolved to a file, its node exists with a placeholder path '<name>.tbl'. Do not treat that path as a real file.",
+        id: "model-path-is-not-a-file",
+        rule: "A Model node's path can be a declared reference ($DATA:/dir/x.tbl, ../x.tbl), the .spg path of the page that embeds a dataflow, or a placeholder '<name>.tbl' for an output table or a model that was never resolved. Do not treat a Model path as proof that the file exists.",
+    },
+    InterpretationRule {
+        id: "dangling-page",
+        rule: "A Page node with no Contains edge was created from a link or embed target; no scanned page backs it. Navigation to it is a reference to a page that is not in the scanned project.",
     },
     InterpretationRule {
         id: "depends-on-is-overloaded",
         rule: "DependsOn has two meanings, told apart by meta.operation: 'Conditions' means the Condition node belongs to its owner (Condition -> owner); 'DependsOn' means the source depends on the target symbol.",
+    },
+    InterpretationRule {
+        id: "field-write-is-not-always-a-write",
+        rule: "FieldWrite edges are written next to Writes, ActionWrites, ActionValidates and ActionLoadsData. Read meta.operation before calling one a write: ActionValidates is a validation, ActionLoadsData (target field:<model>.*) is a load or reset.",
     },
     InterpretationRule {
         id: "field-nodes-include-symbols",
@@ -790,6 +1158,33 @@ const INTERPRETATION_RULES: &[InterpretationRule] = &[
     },
 ];
 
+const EXAMPLES: &[QueryExample] = &[
+    QueryExample {
+        title: "Which model fields do components read",
+        gql: "MATCH (a:Node)-[r:Reads]->(b:Node) RETURN a.id, b.id, r.field_path",
+    },
+    QueryExample {
+        title: "Which nodes carry a visibleCondition",
+        gql: "MATCH (n:Node) WHERE n.meta CONTAINS 'visibleCondition' RETURN n.id",
+    },
+    QueryExample {
+        title: "Which actions write which fields (filter FieldWrite by operation)",
+        gql: "MATCH (a:Node)-[r:FieldWrite]->(f:Node) WHERE r.meta CONTAINS '\"operation\":\"ActionWrites\"' RETURN a.id, f.id",
+    },
+    QueryExample {
+        title: "Which page does each link action open",
+        gql: "MATCH (a:Node)-[r:ActionNavigates]->(p:Node) RETURN a.id, p.id",
+    },
+    QueryExample {
+        title: "Which tables does each dataflow read from",
+        gql: "MATCH (m:Node)-[r:DataflowInput]->(t:Node) RETURN m.id, t.id, r.field_path",
+    },
+    QueryExample {
+        title: "Which filters are configured on models",
+        gql: "MATCH (c:Node) WHERE c.node_type = 'Condition' AND c.id CONTAINS '#filter#' RETURN c.id, c.meta",
+    },
+];
+
 const DIALECT_NOTES: &[&str] = &[
     "Several edge types are written [:Reads|Triggers] (no colon before the second name).",
     "Use the CONTAINS / STARTS WITH operators; there is no =~ regex and no CONTAINS() function.",
@@ -798,11 +1193,20 @@ const DIALECT_NOTES: &[&str] = &[
     "Always write (n:Node); the graph also holds internal IndexState records.",
 ];
 
+const LABELS: GraphLabels = GraphLabels {
+    project_node: "Node",
+    node_properties: &["id", "node_type", "path", "name", "meta", "origin_file"],
+    edge_properties: &["field_path", "meta", "origin_file"],
+    internal_label: "IndexState",
+};
+
 const SCHEMA: GraphSchema = GraphSchema {
     contract_version: GRAPH_SCHEMA_CONTRACT_VERSION,
+    labels: LABELS,
     node_types: NODE_TYPES,
     edge_types: EDGE_TYPES,
     interpretation_rules: INTERPRETATION_RULES,
+    examples: EXAMPLES,
     dialect_notes: DIALECT_NOTES,
 };
 
@@ -827,45 +1231,66 @@ impl GraphSchema {
     }
 }
 
+impl MetaValueType {
+    /// 契约里的类型名（与 JSON 输出同写法）。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::String => "string",
+            Self::Bool => "bool",
+            Self::Number => "number",
+            Self::Array => "array",
+            Self::Object => "object",
+            Self::Any => "any",
+        }
+    }
+
+    /// 一个 JSON 值是否符合该类型（`null` 由 `nullable` 单独决定，不在这里判）。
+    pub fn accepts(self, value: &Value) -> bool {
+        match self {
+            Self::String => value.is_string(),
+            Self::Bool => value.is_boolean(),
+            Self::Number => value.is_number(),
+            Self::Array => value.is_array(),
+            Self::Object => value.is_object(),
+            Self::Any => true,
+        }
+    }
+}
+
 /// 边 / 节点类型在图里的名字（即枚举变体名）。
 pub fn variant_name(value: &impl std::fmt::Debug) -> String {
     format!("{value:?}")
 }
 
-/// `--graph-schema` 的 JSON 输出。
+/// `--graph-schema` 的 JSON 输出：契约表本身的序列化，没有手写副本。
 pub fn to_json() -> Value {
-    json!({
-        "contract_version": SCHEMA.contract_version,
-        "labels": {
-            "project_node": "Node",
-            "node_properties": ["id", "node_type", "path", "name", "meta", "origin_file"],
-            "edge_properties": ["field_path", "meta", "origin_file"],
-            "internal_label": "IndexState"
-        },
-        "node_types": SCHEMA.node_types,
-        "edge_types": SCHEMA.edge_types,
-        "interpretation_rules": SCHEMA.interpretation_rules,
-        "dialect_notes": SCHEMA.dialect_notes,
+    serde_json::to_value(SCHEMA).unwrap_or_else(|error| {
+        // 契约全是静态数据，序列化不会失败；万一失败要让输出自己说明，而不是静默给空对象
+        json!({ "error": format!("failed to serialize the graph schema: {error}") })
     })
 }
 
 fn push_meta_keys(out: &mut String, keys: &[MetaKeySchema], indent: &str) {
     for meta_key in keys {
         let marker = if meta_key.required {
-            " (always present)"
+            ", always present"
         } else {
             ""
         };
+        let null_marker = if meta_key.nullable { " or null" } else { "" };
         let _ = writeln!(
             out,
-            "{indent}- `{}`{marker}: {}",
-            meta_key.name, meta_key.description
+            "{indent}- `{}` ({}{null_marker}{marker}): {}",
+            meta_key.name,
+            meta_key.value_type.as_str(),
+            meta_key.description
         );
     }
 }
 
 /// `--graph-schema --human` 与 `docs/reference/graph-schema.md` 共用的 Markdown。
 pub fn to_markdown() -> String {
+    let labels = &SCHEMA.labels;
     let mut out = String::new();
     let _ = writeln!(
         out,
@@ -882,11 +1307,19 @@ pub fn to_markdown() -> String {
     let _ = writeln!(out);
     let _ = writeln!(
         out,
-        "- Project nodes have label `Node` with properties `id`, `node_type`, `path`, `name`, `meta`, `origin_file`."
+        "- Project nodes have label `{}` with properties {}.",
+        labels.project_node,
+        quoted_list(labels.node_properties)
     );
     let _ = writeln!(
         out,
-        "- Edges are typed by edge-type name and carry `field_path`, `meta`, `origin_file`."
+        "- Edges are typed by edge-type name and carry {}.",
+        quoted_list(labels.edge_properties)
+    );
+    let _ = writeln!(
+        out,
+        "- The graph also holds internal `{}` records; always write `(n:{})`.",
+        labels.internal_label, labels.project_node
     );
     let _ = writeln!(out, "- `meta` is JSON text, not a map.");
     let _ = writeln!(out);
@@ -902,7 +1335,12 @@ pub fn to_markdown() -> String {
         if row.meta_keys.is_empty() {
             let _ = writeln!(out, "- meta: none");
         } else {
-            let _ = writeln!(out, "- meta keys:");
+            let open = if row.meta_open {
+                " (open: other keys can occur)"
+            } else {
+                ""
+            };
+            let _ = writeln!(out, "- meta keys{open}:");
             push_meta_keys(&mut out, row.meta_keys, "  ");
         }
         let _ = writeln!(out, "- notes: {}", row.notes);
@@ -931,6 +1369,7 @@ pub fn to_markdown() -> String {
             match row.field_path {
                 FieldPathUse::Never => "never set",
                 FieldPathUse::Always => "always set",
+                FieldPathUse::Sometimes => "set on some edges",
             },
             row.field_path_meaning
         );
@@ -939,6 +1378,10 @@ pub fn to_markdown() -> String {
         } else {
             let _ = writeln!(out, "- meta keys:");
             push_meta_keys(&mut out, row.meta_keys, "  ");
+        }
+        let _ = writeln!(out, "- produced by:");
+        for source in row.producers {
+            let _ = writeln!(out, "  - `{}`: {}", source.path, source.rule);
         }
         let _ = writeln!(out, "- when absent: {}", row.absent_when);
     }
@@ -949,6 +1392,13 @@ pub fn to_markdown() -> String {
         let _ = writeln!(out, "- **{}**: {}", rule.id, rule.rule);
     }
     let _ = writeln!(out);
+    let _ = writeln!(out, "## Example queries");
+    let _ = writeln!(out);
+    for example in SCHEMA.examples {
+        let _ = writeln!(out, "- {}:", example.title);
+        let _ = writeln!(out, "  `{}`", example.gql);
+    }
+    let _ = writeln!(out);
     let _ = writeln!(out, "## GQL dialect notes");
     let _ = writeln!(out);
     for note in SCHEMA.dialect_notes {
@@ -957,8 +1407,18 @@ pub fn to_markdown() -> String {
     out
 }
 
+/// `` `a`, `b`, `c` `` 形式的列表。
+fn quoted_list(items: &[&str]) -> String {
+    items
+        .iter()
+        .map(|item| format!("`{item}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// `--gql` 的 long help：紧凑版，完整内容走 `--graph-schema`。
 pub fn gql_long_help() -> String {
+    let labels = &SCHEMA.labels;
     let mut out = String::new();
     let _ = writeln!(
         out,
@@ -968,7 +1428,9 @@ pub fn gql_long_help() -> String {
     let _ = writeln!(out, "Schema (full version: --graph-schema):");
     let _ = writeln!(
         out,
-        "  - Every project node has label Node with properties id, node_type, path, name, meta, origin_file."
+        "  - Every project node has label {} with properties {}.",
+        labels.project_node,
+        labels.node_properties.join(", ")
     );
     let node_types: Vec<String> = SCHEMA
         .node_types
@@ -984,7 +1446,8 @@ pub fn gql_long_help() -> String {
     }
     let _ = writeln!(
         out,
-        "  - Edges are typed by edge-type name and carry field_path, meta, origin_file. List the types with:"
+        "  - Edges are typed by edge-type name and carry {}. List the types with:",
+        labels.edge_properties.join(", ")
     );
     let _ = writeln!(out, "      MATCH ()-[r]->() RETURN DISTINCT type(r)");
     let _ = writeln!(out, "  - Edge types the scanner writes:");
@@ -1017,14 +1480,9 @@ pub fn gql_long_help() -> String {
     }
     let _ = writeln!(out);
     let _ = writeln!(out, "Examples:");
-    let _ = writeln!(
-        out,
-        "  MATCH (a:Node)-[r:Reads]->(b:Node) RETURN a.id, b.id, r.field_path"
-    );
-    let _ = writeln!(
-        out,
-        "  MATCH (n:Node) WHERE n.meta CONTAINS 'visibleCondition' RETURN n.id"
-    );
+    for example in SCHEMA.examples {
+        let _ = writeln!(out, "  {}", example.gql);
+    }
     let _ = writeln!(out);
     let _ = writeln!(out, "Dialect notes:");
     for note in SCHEMA.dialect_notes {
