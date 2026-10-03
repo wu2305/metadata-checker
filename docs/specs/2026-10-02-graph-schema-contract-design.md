@@ -121,7 +121,7 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 ### 6.3 图形状（契约表新增的行，随 S6 落地）
 
 - 新节点类型 `Script`：脚本本身。id `script:<源文件>|<脚本引用>`；`meta` 含 `kind`（`frontend`：普通 `.ts`；`backend`：`action.ts`，Nashorn）、`content_hash`（脚本文本的 hash）、`entry_names`（已知函数名，如 `setMsg`）。
-- 新**扫描**边（确定性，属于扫描事实）：`ExecutesScript`：`Action → Script`（前端 `script` action，按 `scriptFunction` 在页面绑定的 `.ts` 文件里定位函数；页面与 `.ts` 的绑定规则见 §7 问题 7）；后端：`workflow 节点 → Script` 的链接边（暂名 `LinksScript`）由扫描从工作流元数据里的 `action.ts` 路径确定性地产生；路径解析不到文件时落占位 `Script` 节点并报诊断，不静默丢弃。扫描只负责「这里有一段脚本」，不解读脚本。
+- 新**扫描**边（确定性，属于扫描事实）：`ExecutesScript`：`Action → Script`（前端 `script` action，按 `scriptFunction` 在页面绑定的 `.ts` 文件里定位函数；页面与 `.ts` 的绑定规则见 §7 问题 9）；后端：`workflow 节点 → Script` 的链接边（暂名 `LinksScript`）由扫描从工作流元数据里的 `action.ts` 路径确定性地产生；路径解析不到文件时落占位 `Script` 节点并报诊断，不静默丢弃。扫描只负责「这里有一段脚本」，不解读脚本。
 - 新**衍生**边（仅起点为 `Script` 节点，端点必须是图里已存在的节点）：
 
 | 边类型 | 端点 | 含义 |
@@ -141,7 +141,7 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 
 ### 6.4 提交与校验：不经 GQL 写
 
-- `--gql` 保持只读（引擎只读会话加形态闸，两道闸不动）。写入走专用命令（暂名 `--annotate <file.json>`），载荷是提案列表：`{edge_type, from, to, evidence, confidence, analyzer}`。
+- `--gql` 保持只读（引擎只读会话加形态闸，两道闸不动）。写入走专用命令（暂名 `--annotate <file.json>`），载荷是提案列表：`{edge_type, from, to, script_hash, evidence, confidence, analyzer}`。
 - 校验全部由契约表驱动，任何一条不过即**拒收该提案并说明原因**（不静默丢弃、不 `panic!`）：
   1. `edge_type` 必须是表里 `layer = inferred` 的类型；
   2. 起止节点必须已存在，且类型符合该边的端点组合；起点必须是 `Script` 节点；
@@ -159,9 +159,9 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 
 ### 6.6 与 S1–S5 的关系
 
-不改变 S1 / S2。S3 引入的 schema v2（扁平边属性、拒载旧库）是 S6 的前提；契约表的 `layer`（scan / inferred）列在 S6 加入，S1 的表不需要预留。S6 单独出 plan，待 §7 问题 5–7 有答案后再定。
+不改变 S1 / S2。S3 引入的 schema v2（扁平边属性、拒载旧库）是 S6 的前提；契约表的 `layer`（scan / inferred）列在 S6 加入，S1 的表不需要预留。S6 单独出 plan，待 §7 问题 5–9 有答案后再定。
 
-## 7. 待决问题（未答复时按推荐处理；问题 5–8 来自 2026-10-02 脚本场景）
+## 7. 待决问题（未答复时按推荐处理；问题 5–9 来自 2026-10-02 脚本场景）
 
 1. **过滤字段名**：评测里 `externalUserId`/`staffId` 没被报出，是图里没有、还是模型没查到？实现前先在夹具上核实；若图里没有，作为 S3 的第三类事实加入。
 2. **解释规则放哪**：推荐放在 schema 表里随 `--graph-schema` 一起输出（单一真源）；备选是只放 SKILL 文档。
@@ -171,4 +171,4 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 6. **`action.ts` 的路径基准**：节点里的路径是相对项目根、相对工作流文件，还是带 `$DATA:` 之类前缀（现有 `.tbl` 引用有这种形式）？决定 `Script` 节点 id 的归一化方式。
 7. **LLM 分析由谁跑**：推荐在工具之外（agent / skill）读脚本，经 `--annotate` 提交；工具不内置模型调用。是否同意？
 8. **标注持久化**：推荐 sidecar 文件为准（§6.5）；备选是只存在图库内。后者在全量重建时会丢标注。
-7. **页面与前端 `.ts` 怎么绑定**：真实语料的页面 JSON 里只有 `scriptFunction`，没有 `.ts` 路径。是约定同名（`合同协议.spg` 对 `合同协议.ts`），还是页面里有别处声明（哪个字段）？需要一个页面加对应 `.ts` 的样例。
+9. **页面与前端 `.ts` 怎么绑定**：真实语料的页面 JSON 里只有 `scriptFunction`，没有 `.ts` 路径。是约定同名（`合同协议.spg` 对 `合同协议.ts`），还是页面里有别处声明（哪个字段）？需要一个页面加对应 `.ts` 的样例。

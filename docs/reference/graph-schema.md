@@ -16,7 +16,7 @@ Generated from `src/graph_schema.rs` by `metadata-checker --graph-schema --human
 A SuperPage file (.spg), or a page that another page refers to.
 
 - id: page:<project-relative path>
-- path: The .spg path. A referenced page is created from the link target even when no file exists there, so a Page node with no Contains edge is a dangling reference, not a scanned page.
+- path: The .spg path. A referenced page is created from the link target even when no file exists there, so a Page node is a dangling reference unless a scanned file backs it (see the dangling-page rule); a missing Contains edge alone does not tell, since a scanned page with no canvas has none.
 - meta: none
 - notes: No meta.
 
@@ -64,7 +64,7 @@ A data model: a physical table (.tbl), a dataflow, a model referenced by a page,
 
 A table field, or a non-table symbol: a page parameter, a user property or a system variable.
 
-- id: field:<model>.<field> | field:<model>.* (stands for all fields of the model; target of loadData-style writes) | field:<page path>|<model>.<field> (ownership-bound graphs only; see the Model notes) | param:<page path>|<param name> | param:<page name>/<param name> (parameter of a referenced page) | user:user.<NAME> | system:<name>
+- id: field:<model>.<field> | field:<model>.* (stands for all fields of the model; target of loadData-style writes) | field:<page path>|<model>.<field> (ownership-bound graphs only; see the Model notes) | param:<page path>|<param name> | param:<page name>/<param name> (parameter of a referenced page) | user:<namespace>.<name> (the part after $; the namespace is usually user, but =$project.name gives user:project.name) | system:<name>
 - path: The path of the model the field belongs to (the .tbl path for field:, or the .spg path for a field of a dataflow embedded in a page), the page path for param:, and 'system' for user: and system:.
 - meta keys (open: other keys can occur):
   - `kind` (string): param | user_property | system_var on non-table symbols; implicit on the model's totalRowCount__ field.
@@ -150,7 +150,7 @@ Structural containment: page contains component, component contains component, m
 - meta: none
 - produced by:
   - `scanner/spg.rs::process_spg_file_from_value_with_identity`: Second pass over the page's components: page -> every component, and parent component -> nested component (one Component parent each).
-  - `scanner/spg.rs::process_spg_file_from_value_with_identity`: A dataflow embedded in the page: model -> each of its dimension fields; a model with a filter also contains the implicit field totalRowCount__.
+  - `scanner/spg.rs::process_spg_file_from_value_with_identity`: A dataflow embedded in the page: model -> each of its dimension fields; a model with a filter also contains the implicit field totalRowCount__ (the totalRowCount__ edge is missing when the model node does not exist yet at that point, see DependsOn).
   - `scanner/spg.rs::ensure_model_field_with_scope`: Every model.field a page expression touches: model -> field.
   - `scanner/tbl.rs::process_tbl_file_from_string`: A .tbl: model -> each dimension field; the output table (dbTableName) also contains the same dimension fields.
 - when absent: Complete for what the scanner parsed.
@@ -171,7 +171,7 @@ A component owns an action (the action fires from that component).
 A component's expression reads a model field.
 
 - endpoints: Component -> Field; Component -> Model
-- field_path: always set (<model>.<field> that is read.)
+- field_path: always set (<model>.<field> that is read; just <model> when the expression names the model without a field (a bare ${model1}), which goes with a Model target.)
 - meta keys:
   - `actor_kind` (string): component.
   - `actor_id` (string): Component id.
@@ -257,7 +257,7 @@ An action writes to a model (submitData, insertData, updateData, deleteData, ...
 An action reads a model or field (as a query input, a link parameter value or a set-parameter value).
 
 - endpoints: Action -> Field; Action -> Model
-- field_path: always set (<model>.<field> that is read.)
+- field_path: always set (<model>.<field> that is read; just <model> when the expression names the model without a field (a bare ${model1}), which goes with a Model target.)
 - meta keys:
   - `actor_kind` (string): action.
   - `actor_id` (string): Action id.
@@ -288,7 +288,7 @@ A link action opens another page.
   - `target_model` (string): Target page name.
 - produced by:
   - `scanner/spg.rs::process_spg_file_from_value_with_identity`: A link action with targetType app whose path is an index into referenceResources that resolves to a .spg page path: the target Page node is upserted, then Action -> Page.
-- when absent: A link whose target cannot be resolved to a page path (index out of range, an absolute path, a URI, an unknown $-prefix, a target that is not .spg) produces no edge and no Page node, and nothing in the graph marks the gap. A link whose path resolves but whose file does not exist still produces the edge, to a Page node with no Contains edge. Absence is not proof there is no navigation. The query-time diagnostic UNRESOLVED_PAGE_NAVIGATION only fires for a target node that is missing from the graph, which this scanner never leaves, so it does not cover either case.
+- when absent: A link whose target cannot be resolved to a page path (index out of range, an absolute path, a URI, an unknown $-prefix, a target that is not .spg) produces no edge and no Page node, and nothing in the graph marks the gap. A link whose path resolves but whose file does not exist still produces the edge, to a Page node that no scanned file backs (no file_state record). Absence is not proof there is no navigation. The query-time diagnostic UNRESOLVED_PAGE_NAVIGATION only fires for a target node that is missing from the graph, which this scanner never leaves, so it does not cover either case.
 
 ### PassesParam
 
@@ -347,7 +347,7 @@ An action controls a UI component: opens or closes a dialog, shows or hides a co
   - `scanner/spg.rs::process_spg_file_from_value_with_identity`: showDialog: the dialog component named by the action.
   - `scanner/spg.rs::process_spg_file_from_value_with_identity`: closeDialog: points at the component the action sits on (the dialog being closed).
   - `scanner/spg.rs::process_spg_file_from_value_with_identity`: switchPanel: the action's panel book.
-- when absent: Only UI-control action types produce it.
+- when absent: Only UI-control action types produce it. A showComponent / hideComponent whose target id is not a component of the page produces no edge (the scanner does not create the target, and the store drops an edge to a missing node), and nothing in the graph marks the gap.
 
 ### ActionValidates
 
@@ -385,7 +385,7 @@ A loadData / resetData style action loads or resets a model, or the components i
 - produced by:
   - `scanner/spg.rs::process_spg_file_from_value_with_identity`: resetData / newData / refreshModels / refreshData / loadData with a data set, or with components whose submitField names a model: Action -> Model with field <model>.* (through add_model_write_with_scope, so a FieldWrite edge to field:<model>.* with operation ActionLoadsData comes with it).
   - `scanner/spg.rs::process_spg_file_from_value_with_identity`: The same action types with only submit components that carry no submitField: Action -> each named Component, no field_path.
-- when absent: Only load / reset / refresh action types produce it.
+- when absent: Only load / reset / refresh action types produce it. A submit component id that is not a component of the page produces no Component edge, and nothing in the graph marks the gap.
 
 ### EmbedsPage
 
@@ -396,7 +396,7 @@ A component embeds another page (composition, not a user navigation).
 - meta: none
 - produced by:
   - `scanner/spg.rs::process_spg_file_from_value_with_identity`: An embedsuperpage component whose resPath is an index into referenceResources that resolves to a .spg page path: the target Page node is upserted, then Component -> Page.
-- when absent: An embed whose target cannot be resolved produces no edge and nothing in the graph marks the gap; one whose path resolves but whose file does not exist produces the edge to a Page node with no Contains edge.
+- when absent: An embed whose target cannot be resolved produces no edge and nothing in the graph marks the gap; one whose path resolves but whose file does not exist produces the edge to a Page node that no scanned file backs (no file_state record).
 
 ### DependsOn
 
@@ -424,7 +424,7 @@ Overloaded edge. operation = DependsOn: an expression depends on an upstream sym
   - `scanner/spg.rs::process_spg_file_from_value_with_identity`: Every Condition node: Condition -> its owner (component, action or model source), operation Conditions.
   - `scanner/spg.rs::process_spg_file_from_value_with_identity`: Every symbol a Condition references (component, param, model, user, system): Condition -> that symbol, operation DependsOn.
   - `scanner/spg.rs::process_spg_file_from_value_with_identity`: A model source filter: Condition -> the model's implicit field totalRowCount__, operation DependsOn.
-- when absent: Only symbols the expression parser recognises (component, param, user, system, model field) produce edges; other text is not tracked.
+- when absent: Only symbols the expression parser recognises (component, param, user, system, model field) produce edges; other text is not tracked. A filter on a dwtable source that nothing else on the page references loses its Condition -> model owner edge: the scanner writes condition edges before it creates that Model node, and the store drops an edge whose endpoint is missing. The Condition node and its DependsOn edge to totalRowCount__ are still there.
 
 ### DataflowInput
 
@@ -496,10 +496,10 @@ Declared in the enum, never written by the scanner. Dataflow internals live in t
 - **hidden-is-configuration**: A component with a visibleCondition (or disableCondition) is hidden or disabled by configuration under some state. That is intended behaviour, not a rendering fault; do not report it as a defect.
 - **absent-edge-is-not-absent-relation**: A missing edge does not always mean the relation does not exist. Check the edge type's absent_when: unresolved navigation or embed targets and unrecognised expression text produce no edge.
 - **model-path-is-not-a-file**: A Model node's path can be a declared reference ($DATA:/dir/x.tbl, ../x.tbl), the .spg path of the page that embeds a dataflow, or a placeholder '<name>.tbl' for an output table or a model that was never resolved. Do not treat a Model path as proof that the file exists.
-- **dangling-page**: A Page node with no Contains edge was created from a link or embed target; no scanned page backs it. Navigation to it is a reference to a page that is not in the scanned project.
+- **dangling-page**: A Page node with no Contains edge is not necessarily a reference to a missing file: a scanned page with no canvas has none either. A page was scanned only if an IndexState record with key 'file_state:<path>' exists for it. A Page node without that record was created from a link or embed target, and no scanned file backs it.
 - **depends-on-is-overloaded**: DependsOn has two meanings, told apart by meta.operation: 'Conditions' means the Condition node belongs to its owner (Condition -> owner); 'DependsOn' means the source depends on the target symbol.
 - **field-write-is-not-always-a-write**: FieldWrite edges are written next to Writes, ActionWrites, ActionValidates and ActionLoadsData. Read meta.operation before calling one a write: ActionValidates is a validation, ActionLoadsData (target field:<model>.*) is a load or reset.
-- **field-nodes-include-symbols**: Field nodes include page parameters (param:), user properties (user:) and system variables (system:), not only table fields (field:). meta.kind tells them apart.
+- **field-nodes-include-symbols**: Field nodes include page parameters (param:), user properties (user:) and system variables (system:), not only table fields (field:). The id prefix tells them apart and is authoritative; meta.kind is set only on nodes created from an expression or condition, so a parameter created only by a link or setParamValue action has no meta.
 - **field-path-varies**: r.field_path does not mean the same thing on every edge type: usually <model>.<field>, but an expression on PassesParam / ActionSetsParam, a page path on ActionNavigates / EmbedsPage, a table path on DataflowInput / DataflowOutput. See each edge type's field_path_meaning.
 - **model-filters-are-conditions**: Filters configured on a model are Condition nodes owned by that model (DependsOn edge with meta.operation = Conditions, json_path starting with sources[...].filter). Read their raw_expr for the filter fields and values.
 

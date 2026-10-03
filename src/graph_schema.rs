@@ -213,7 +213,7 @@ const NODE_TYPES: &[NodeTypeSchema] = &[
         summary: "A SuperPage file (.spg), or a page that another page refers to.",
         id_prefixes: &["page"],
         id_formats: &["page:<project-relative path>"],
-        path_meaning: "The .spg path. A referenced page is created from the link target even when no file exists there, so a Page node with no Contains edge is a dangling reference, not a scanned page.",
+        path_meaning: "The .spg path. A referenced page is created from the link target even when no file exists there, so a Page node is a dangling reference unless a scanned file backs it (see the dangling-page rule); a missing Contains edge alone does not tell, since a scanned page with no canvas has none.",
         meta_keys: &[],
         meta_open: false,
         notes: "No meta.",
@@ -331,7 +331,7 @@ const NODE_TYPES: &[NodeTypeSchema] = &[
             "field:<page path>|<model>.<field> (ownership-bound graphs only; see the Model notes)",
             "param:<page path>|<param name>",
             "param:<page name>/<param name> (parameter of a referenced page)",
-            "user:user.<NAME>",
+            "user:<namespace>.<name> (the part after $; the namespace is usually user, but =$project.name gives user:project.name)",
             "system:<name>",
         ],
         path_meaning: "The path of the model the field belongs to (the .tbl path for field:, or the .spg path for a field of a dataflow embedded in a page), the page path for param:, and 'system' for user: and system:.",
@@ -543,7 +543,7 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
             ),
             producer(
                 SPG,
-                "A dataflow embedded in the page: model -> each of its dimension fields; a model with a filter also contains the implicit field totalRowCount__.",
+                "A dataflow embedded in the page: model -> each of its dimension fields; a model with a filter also contains the implicit field totalRowCount__ (the totalRowCount__ edge is missing when the model node does not exist yet at that point, see DependsOn).",
             ),
             producer(
                 "scanner/spg.rs::ensure_model_field_with_scope",
@@ -579,7 +579,7 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
             pair(NodeType::Component, NodeType::Model),
         ],
         field_path: FieldPathUse::Always,
-        field_path_meaning: "<model>.<field> that is read.",
+        field_path_meaning: "<model>.<field> that is read; just <model> when the expression names the model without a field (a bare ${model1}), which goes with a Model target.",
         meta_keys: &[
             opt("actor_kind", Str, "component."),
             opt("actor_id", Str, "Component id."),
@@ -724,7 +724,7 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
             pair(NodeType::Action, NodeType::Model),
         ],
         field_path: FieldPathUse::Always,
-        field_path_meaning: "<model>.<field> that is read.",
+        field_path_meaning: "<model>.<field> that is read; just <model> when the expression names the model without a field (a bare ${model1}), which goes with a Model target.",
         meta_keys: &[
             opt("actor_kind", Str, "action."),
             opt("actor_id", Str, "Action id."),
@@ -770,7 +770,7 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
             SPG,
             "A link action with targetType app whose path is an index into referenceResources that resolves to a .spg page path: the target Page node is upserted, then Action -> Page.",
         )],
-        absent_when: "A link whose target cannot be resolved to a page path (index out of range, an absolute path, a URI, an unknown $-prefix, a target that is not .spg) produces no edge and no Page node, and nothing in the graph marks the gap. A link whose path resolves but whose file does not exist still produces the edge, to a Page node with no Contains edge. Absence is not proof there is no navigation. The query-time diagnostic UNRESOLVED_PAGE_NAVIGATION only fires for a target node that is missing from the graph, which this scanner never leaves, so it does not cover either case.",
+        absent_when: "A link whose target cannot be resolved to a page path (index out of range, an absolute path, a URI, an unknown $-prefix, a target that is not .spg) produces no edge and no Page node, and nothing in the graph marks the gap. A link whose path resolves but whose file does not exist still produces the edge, to a Page node that no scanned file backs (no file_state record). Absence is not proof there is no navigation. The query-time diagnostic UNRESOLVED_PAGE_NAVIGATION only fires for a target node that is missing from the graph, which this scanner never leaves, so it does not cover either case.",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::PassesParam,
@@ -854,7 +854,7 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
             ),
             producer(SPG, "switchPanel: the action's panel book."),
         ],
-        absent_when: "Only UI-control action types produce it.",
+        absent_when: "Only UI-control action types produce it. A showComponent / hideComponent whose target id is not a component of the page produces no edge (the scanner does not create the target, and the store drops an edge to a missing node), and nothing in the graph marks the gap.",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::ActionValidates,
@@ -916,7 +916,7 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
                 "The same action types with only submit components that carry no submitField: Action -> each named Component, no field_path.",
             ),
         ],
-        absent_when: "Only load / reset / refresh action types produce it.",
+        absent_when: "Only load / reset / refresh action types produce it. A submit component id that is not a component of the page produces no Component edge, and nothing in the graph marks the gap.",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::EmbedsPage,
@@ -930,7 +930,7 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
             SPG,
             "An embedsuperpage component whose resPath is an index into referenceResources that resolves to a .spg page path: the target Page node is upserted, then Component -> Page.",
         )],
-        absent_when: "An embed whose target cannot be resolved produces no edge and nothing in the graph marks the gap; one whose path resolves but whose file does not exist produces the edge to a Page node with no Contains edge.",
+        absent_when: "An embed whose target cannot be resolved produces no edge and nothing in the graph marks the gap; one whose path resolves but whose file does not exist produces the edge to a Page node that no scanned file backs (no file_state record).",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::DependsOn,
@@ -1008,7 +1008,7 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
                 "A model source filter: Condition -> the model's implicit field totalRowCount__, operation DependsOn.",
             ),
         ],
-        absent_when: "Only symbols the expression parser recognises (component, param, user, system, model field) produce edges; other text is not tracked.",
+        absent_when: "Only symbols the expression parser recognises (component, param, user, system, model field) produce edges; other text is not tracked. A filter on a dwtable source that nothing else on the page references loses its Condition -> model owner edge: the scanner writes condition edges before it creates that Model node, and the store drops an edge whose endpoint is missing. The Condition node and its DependsOn edge to totalRowCount__ are still there.",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::DataflowInput,
@@ -1134,7 +1134,7 @@ const INTERPRETATION_RULES: &[InterpretationRule] = &[
     },
     InterpretationRule {
         id: "dangling-page",
-        rule: "A Page node with no Contains edge was created from a link or embed target; no scanned page backs it. Navigation to it is a reference to a page that is not in the scanned project.",
+        rule: "A Page node with no Contains edge is not necessarily a reference to a missing file: a scanned page with no canvas has none either. A page was scanned only if an IndexState record with key 'file_state:<path>' exists for it. A Page node without that record was created from a link or embed target, and no scanned file backs it.",
     },
     InterpretationRule {
         id: "depends-on-is-overloaded",
@@ -1146,7 +1146,7 @@ const INTERPRETATION_RULES: &[InterpretationRule] = &[
     },
     InterpretationRule {
         id: "field-nodes-include-symbols",
-        rule: "Field nodes include page parameters (param:), user properties (user:) and system variables (system:), not only table fields (field:). meta.kind tells them apart.",
+        rule: "Field nodes include page parameters (param:), user properties (user:) and system variables (system:), not only table fields (field:). The id prefix tells them apart and is authoritative; meta.kind is set only on nodes created from an expression or condition, so a parameter created only by a link or setParamValue action has no meta.",
     },
     InterpretationRule {
         id: "field-path-varies",

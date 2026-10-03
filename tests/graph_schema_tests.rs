@@ -471,6 +471,93 @@ fn computed_dimension_meta_keys_are_declared() {
     );
 }
 
+/// 契约里写明的「缺失」与边界形态必须和扫描器的真实产出一致：
+/// 裸模型引用的 field_path、非 `user` 命名空间的用户属性 id、被丢弃的 Condition 属主边、
+/// 指向不存在组件的显隐控制、以及没有 canvas 的已扫描页面。
+#[test]
+fn documented_boundary_cases_match_the_scanner() {
+    let project = std::env::temp_dir().join(format!(
+        "graph-schema-boundary-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&project).expect("create project dir");
+    let page = serde_json::json!({
+        "version": "1",
+        "params": [],
+        "sources": [
+            {"id": "model1", "modelType": "dwtable", "path": "data/table1.tbl",
+             "filter": {"scope": "self", "matchAll": true, "clauses": [{"exp": "model1.status = 'active'"}]}},
+            {"id": "model2", "modelType": "dwtable", "path": "data/table2.tbl"}
+        ],
+        "canvas": {"id": "canvas", "type": "canvas", "components": [
+            {"id": "btn", "type": "button",
+             "actions": [{"id": "a1", "type": "showComponent", "target": "ghost"}]},
+            {"id": "txt", "type": "input", "value": "=$project.name"},
+            {"id": "txt2", "type": "input", "value": "${model2}"}
+        ]}
+    });
+    std::fs::write(project.join("a.spg"), page.to_string()).expect("write a.spg");
+    std::fs::write(
+        project.join("nocanvas.spg"),
+        serde_json::json!({"version": "1", "params": [], "sources": []}).to_string(),
+    )
+    .expect("write nocanvas.spg");
+    let db = build_graph(&project, "boundary");
+
+    // 裸 `${model2}` 只产出模型级 Reads，field_path 就是模型名，没有 `.<field>`
+    let reads = gql_rows(
+        &db,
+        "MATCH (a:Node)-[r:Reads]->(b:Node) WHERE a.id = 'comp:a.spg|txt2' RETURN b.id, r.field_path",
+    );
+    assert_eq!(
+        reads.contains(&vec![
+            Value::String("model:model2".into()),
+            Value::String("model2".into())
+        ]),
+        true,
+        "裸模型引用应得到 field_path = 模型名：{reads:?}"
+    );
+    // `$project.name` 的命名空间不是 user，id 仍是 user:<namespace>.<name>
+    let users = gql_rows(
+        &db,
+        "MATCH (a:Node)-[r:DependsOn]->(b:Node) WHERE a.id = 'comp:a.spg|txt' AND b.id STARTS WITH 'user:' RETURN b.id",
+    );
+    assert_eq!(users, vec![vec![Value::String("user:project.name".into())]]);
+    // 没有别处引用的 dwtable 源：Condition 节点在，但属主边（连到 model:model1）被丢弃
+    let owner_edges = gql_rows(
+        &db,
+        "MATCH (c:Node)-[r:DependsOn]->(m:Node) WHERE m.id = 'model:model1' RETURN c.id",
+    );
+    assert_eq!(owner_edges, Vec::<Vec<Value>>::new());
+    let filter_conditions = gql_rows(
+        &db,
+        "MATCH (c:Node) WHERE c.id = 'cond:a.spg|model1#filter#0#exp' RETURN c.id",
+    );
+    assert_eq!(filter_conditions.len(), 1, "Condition 节点本身仍在");
+    // 指向不存在组件的 showComponent 没有 ActionControlsComponent 边
+    let controls = gql_rows(
+        &db,
+        "MATCH (a:Node)-[r:ActionControlsComponent]->(b:Node) RETURN a.id",
+    );
+    assert_eq!(controls, Vec::<Vec<Value>>::new());
+    // 没有 canvas 的已扫描页面：没有 Contains 边，但有 file_state 记录
+    let contains = gql_rows(
+        &db,
+        "MATCH (p:Node)-[r:Contains]->(c:Node) WHERE p.id = 'page:nocanvas.spg' RETURN c.id",
+    );
+    assert_eq!(contains, Vec::<Vec<Value>>::new());
+    let file_state = gql_rows(
+        &db,
+        "MATCH (s:IndexState) WHERE s.key = 'file_state:nocanvas.spg' RETURN s.key",
+    );
+    assert_eq!(file_state.len(), 1, "已扫描的页面有 file_state 记录");
+    std::fs::remove_dir_all(&project).expect("remove project dir");
+}
+
 #[test]
 fn reference_doc_matches_generated_markdown() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/reference/graph-schema.md");
