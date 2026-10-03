@@ -161,6 +161,18 @@ pub(crate) fn scan_raw_counts(value: &serde_json::Value) -> ScanDiagnostics {
     diags
 }
 
+/// 对原始 SPG JSON 逐次采集扫描诊断记录；`source_file` 回填为 `logical_path`。
+///
+/// 与 [`scan_raw_diagnostics`] 同一次遍历、同一套规则，只是不聚合。
+#[cfg(any(test, feature = "cli-local"))]
+pub fn scan_raw_occurrences(value: &serde_json::Value, logical_path: &str) -> Vec<ScanOccurrence> {
+    let mut occurrences = scan_raw_counts(value).occurrences;
+    for occurrence in &mut occurrences {
+        occurrence.location.source_file = Some(logical_path.to_string());
+    }
+    occurrences
+}
+
 /// 对原始 SPG JSON 采集扫描诊断（未识别容器键 / 重复组件 id）。
 ///
 /// 生产路径由 indexer 按文件采集计数并持久化到 redb（`per_file_scan_diagnostic_entry` /
@@ -168,6 +180,23 @@ pub(crate) fn scan_raw_counts(value: &serde_json::Value) -> ScanDiagnostics {
 #[cfg(any(test, feature = "cli-local"))]
 pub fn scan_raw_diagnostics(value: &serde_json::Value) -> Vec<crate::output::Diagnostic> {
     scan_raw_counts(value).to_diagnostics()
+}
+
+/// 扫描期诊断的一次具体出现（一条记录对应源文件里的一处问题）。
+///
+/// 计数 + 首个样例只够生成聚合信封；要把诊断挂到具体节点（图内 `Diagnostic`
+/// 节点的前置条件），必须逐次保留。`code` 取 `crate::diagnostics::CODE_SCANNER_*`
+/// 的取值，用字符串而非枚举，使旧版本读到新 code 时不会解码失败。
+/// 本类型是纯数据记录，序列化格式随持久化 entry 一起由 indexer 使用。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScanOccurrence {
+    /// `SCANNER_*` 诊断 code
+    pub code: String,
+    /// 出现位置：`source_file`（逻辑路径）、`node_id`（已知时）、`json_path`
+    pub location: crate::output::Location,
+    /// 这一处具体出了什么问题（解析失败时为失败原因原文）
+    #[serde(default)]
+    pub detail: Option<String>,
 }
 
 /// 扫描阶段的轻量诊断计数（PR1 落地，未识别容器键/重复组件 id）。
@@ -184,10 +213,61 @@ pub(crate) struct ScanDiagnostics {
     pub(crate) sample_parse_failed_location: Option<crate::output::Location>,
     /// 解析失败的原因（serde/UTF-8 报错原文），随诊断 message 透出
     pub(crate) parse_failed_reason: Option<String>,
+    /// 逐次出现的记录。新产出的诊断里，各 code 的记录数恒等于对应计数
+    /// （由 `record_*` 同时维护）；旧库 entry 没有这个字段，反序列化为空。
+    pub(crate) occurrences: Vec<ScanOccurrence>,
 }
 
 impl ScanDiagnostics {
-    /// 合并另一份计数（跨文件聚合；样本位置保留首个非空）。
+    /// 记一次「未识别容器键 / 对象形态」：同时维护计数、首个样例与逐次记录。
+    fn record_unrecognized(&mut self, location: crate::output::Location, detail: String) {
+        self.unrecognized_container_key += 1;
+        if self.sample_unrecognized_location.is_none() {
+            self.sample_unrecognized_location = Some(location.clone());
+        }
+        self.occurrences.push(ScanOccurrence {
+            code: crate::diagnostics::CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY.to_string(),
+            location,
+            detail: Some(detail),
+        });
+    }
+
+    /// 记一次「重复组件 id」：同时维护计数、首个样例与逐次记录。
+    fn record_duplicate(&mut self, location: crate::output::Location, detail: String) {
+        self.duplicate_component_id += 1;
+        if self.sample_duplicate_location.is_none() {
+            self.sample_duplicate_location = Some(location.clone());
+        }
+        self.occurrences.push(ScanOccurrence {
+            code: crate::diagnostics::CODE_SCANNER_DUPLICATE_COMPONENT_ID.to_string(),
+            location,
+            detail: Some(detail),
+        });
+    }
+
+    /// 构造「一个文件解析失败」的诊断（由 indexer 在解析阶段失败时调用）。
+    #[cfg(feature = "cli-local")]
+    pub(crate) fn parse_failure(logical_path: &str, reason: &str) -> Self {
+        let location = crate::output::Location {
+            source_file: Some(logical_path.to_string()),
+            node_id: None,
+            json_path: None,
+        };
+        let reason = format!("{logical_path}: {reason}");
+        Self {
+            parse_failed: 1,
+            sample_parse_failed_location: Some(location.clone()),
+            parse_failed_reason: Some(reason.clone()),
+            occurrences: vec![ScanOccurrence {
+                code: crate::diagnostics::CODE_SCANNER_FILE_PARSE_FAILED.to_string(),
+                location,
+                detail: Some(reason),
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// 合并另一份计数（跨文件聚合；样本位置保留首个非空，逐次记录按顺序追加）。
     #[cfg(any(test, feature = "cli-local"))]
     pub(crate) fn merge(&mut self, other: &ScanDiagnostics) {
         self.unrecognized_container_key += other.unrecognized_container_key;
@@ -203,6 +283,7 @@ impl ScanDiagnostics {
             self.sample_parse_failed_location = other.sample_parse_failed_location.clone();
             self.parse_failed_reason = other.parse_failed_reason.clone();
         }
+        self.occurrences.extend(other.occurrences.iter().cloned());
     }
 
     pub(crate) fn to_diagnostics(&self) -> Vec<crate::output::Diagnostic> {
@@ -287,14 +368,14 @@ fn collect_component_contexts_inner_with_context_and_diagnostics(
         .is_some_and(|s| !s.is_empty());
     let is_component = current_id.is_some() && has_type;
     if current_id.is_some() && !has_type {
-        diagnostics.unrecognized_container_key += 1;
-        if diagnostics.sample_unrecognized_location.is_none() {
-            diagnostics.sample_unrecognized_location = Some(crate::output::Location {
+        diagnostics.record_unrecognized(
+            crate::output::Location {
                 source_file: None,
                 node_id: current_id.clone(),
                 json_path: Some(json_path.to_string()),
-            });
-        }
+            },
+            "object has an id but no type, so it is not treated as a component".to_string(),
+        );
     }
 
     let source = node.get("source").and_then(json_scalar_to_string);
@@ -317,14 +398,14 @@ fn collect_component_contexts_inner_with_context_and_diagnostics(
 
     if is_component && let Some(id) = &current_id {
         if contexts.contains_key(id) {
-            diagnostics.duplicate_component_id += 1;
-            if diagnostics.sample_duplicate_location.is_none() {
-                diagnostics.sample_duplicate_location = Some(crate::output::Location {
+            diagnostics.record_duplicate(
+                crate::output::Location {
                     source_file: None,
                     node_id: Some(id.clone()),
                     json_path: Some(json_path.to_string()),
-                });
-            }
+                },
+                "component id was already seen earlier on this page".to_string(),
+            );
         }
         contexts.insert(
             id.clone(),
@@ -405,14 +486,16 @@ fn collect_component_contexts_inner_with_context_and_diagnostics(
             }
             let has_object = arr.iter().any(|item| item.is_object());
             if has_object {
-                diagnostics.unrecognized_container_key += 1;
-                if diagnostics.sample_unrecognized_location.is_none() {
-                    diagnostics.sample_unrecognized_location = Some(crate::output::Location {
+                diagnostics.record_unrecognized(
+                    crate::output::Location {
                         source_file: None,
                         node_id: current_id.clone(),
                         json_path: Some(format!("{}.{}", json_path, key)),
-                    });
-                }
+                    },
+                    format!(
+                        "array under key '{key}' mixes objects that are not components, so it was skipped"
+                    ),
+                );
             }
         }
     }
