@@ -38,6 +38,15 @@ pub fn process_tbl_file_from_string(
     let model_type = if is_dataflow { "DataFlow" } else { "App" };
 
     let mut model_meta = serde_json::json!({"modelType": model_type});
+    // 显式空串 = 未落表数据流；缺省键是另一回事（语义未确认），不在此断言。
+    if value
+        .pointer("/properties/dbTableName")
+        .and_then(|v| v.as_str())
+        .is_some_and(str::is_empty)
+        && let Some(obj) = model_meta.as_object_mut()
+    {
+        obj.insert("landed".to_string(), serde_json::json!(false));
+    }
     // Store dimensions in model meta so chain lineage can resolve field mappings
     if let Some(dims) = value.get("dimensions")
         && let Some(obj) = model_meta.as_object_mut()
@@ -103,12 +112,10 @@ pub fn process_tbl_file_from_string(
         }
     }
 
-    // Process output physical table (dbTableName) for both App and DataFlow
-    if let Some(db_table_name) = value
-        .get("properties")
-        .and_then(|p| p.get("dbTableName"))
-        .and_then(|v| v.as_str())
-    {
+    // Process output physical table (dbTableName) for both App and DataFlow。
+    // 空串表示未落表的数据流：没有输出物理表，所以不建输出边与输出字段
+    // （模型节点上有 `landed: false`），而不是让整次建图因 `model:` 身份为空而中止。
+    if let Some(db_table_name) = output_table_name(&value) {
         let output_model_id = format!("model:{}", db_table_name);
         let db_table_path = format!("{}.tbl", db_table_name);
         // 写入端会保留已有 DataFlow/App modelType，避免物理表占位覆盖真实模型。
@@ -427,6 +434,17 @@ pub fn process_tbl_file_from_string(
 }
 
 /// 校验 TBL 的全部身份来源；表达式与展示属性不属于节点身份。
+/// 输出物理表名：`properties.dbTableName` 为非空字符串时才有。
+///
+/// 空串是合法形态，不是错误：它表示**未落表**的数据流（即时取数的逻辑，没有物理输出表）。
+/// 语料里 38 张表如此（均为 dataFlow，维护者 2026-10-03 确认）。
+fn output_table_name(value: &serde_json::Value) -> Option<&str> {
+    value
+        .pointer("/properties/dbTableName")
+        .and_then(|v| v.as_str())
+        .filter(|name| !name.is_empty())
+}
+
 fn validate_table_identities(value: &serde_json::Value, model_name: &str) -> Result<()> {
     use crate::graph_identity::{NodeIdKind, global_node_id};
     global_node_id(NodeIdKind::Model, model_name)?;
@@ -438,10 +456,7 @@ fn validate_table_identities(value: &serde_json::Value, model_name: &str) -> Res
             global_node_id(NodeIdKind::Field, &format!("{model_name}.{name}"))?;
         }
     }
-    if let Some(name) = value
-        .pointer("/properties/dbTableName")
-        .and_then(|v| v.as_str())
-    {
+    if let Some(name) = output_table_name(value) {
         global_node_id(NodeIdKind::Model, name)?;
     }
     if value.get("dataFlow").is_some() {

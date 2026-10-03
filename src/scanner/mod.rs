@@ -105,4 +105,7 @@ pub use spg::{
 #[cfg(any(test, feature = "cli-local"))]
 pub use spg::{scan_raw_diagnostics, scan_raw_occurrences};
 pub use tbl::process_tbl_file_from_string;
-pub use utils::{add_edge_with_meta, add_identified_node, add_node, resolve_reference_path};
+pub use utils::{
+    ReferenceUnresolved, add_edge_with_meta, add_identified_node, add_node, resolve_reference_path,
+    resolve_reference_target,
+};

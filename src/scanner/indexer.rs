@@ -296,6 +296,11 @@ struct FileScanDiagnostics {
     parse_failed: usize,
     sample_unrecognized_location: Option<crate::output::Location>,
     sample_duplicate_location: Option<crate::output::Location>,
+    /// 旧库 entry 没有以下两个字段，`#[serde(default)]` 读作 0 / None。
+    #[serde(default)]
+    unresolved_reference: usize,
+    #[serde(default)]
+    sample_unresolved_reference_location: Option<crate::output::Location>,
     #[serde(default)]
     sample_parse_failed_location: Option<crate::output::Location>,
     #[serde(default)]
@@ -310,7 +315,10 @@ impl FileScanDiagnostics {
     /// 旧版本写入的 entry：有计数却没有逐次记录。聚合信封仍可用，
     /// 但不能据此把诊断挂到具体节点；重新解析该文件后才会补齐。
     fn lacks_occurrences(&self) -> bool {
-        self.unrecognized_container_key + self.duplicate_component_id + self.parse_failed
+        self.unrecognized_container_key
+            + self.duplicate_component_id
+            + self.parse_failed
+            + self.unresolved_reference
             > self.occurrences.len()
     }
 
@@ -320,6 +328,10 @@ impl FileScanDiagnostics {
             unrecognized_container_key: counts.unrecognized_container_key,
             duplicate_component_id: counts.duplicate_component_id,
             parse_failed: counts.parse_failed,
+            unresolved_reference: counts.unresolved_reference,
+            sample_unresolved_reference_location: counts
+                .sample_unresolved_reference_location
+                .clone(),
             sample_unrecognized_location: counts.sample_unrecognized_location.clone(),
             sample_duplicate_location: counts.sample_duplicate_location.clone(),
             sample_parse_failed_location: counts.sample_parse_failed_location.clone(),
@@ -334,6 +346,8 @@ impl FileScanDiagnostics {
             unrecognized_container_key: self.unrecognized_container_key,
             duplicate_component_id: self.duplicate_component_id,
             parse_failed: self.parse_failed,
+            unresolved_reference: self.unresolved_reference,
+            sample_unresolved_reference_location: self.sample_unresolved_reference_location,
             sample_unrecognized_location: self.sample_unrecognized_location,
             sample_duplicate_location: self.sample_duplicate_location,
             sample_parse_failed_location: self.sample_parse_failed_location,
@@ -367,6 +381,12 @@ fn per_file_scan_diagnostic_entry(update: &ParsedGraphUpdate) -> Result<Option<(
             for occurrence in &mut counts.occurrences {
                 occurrence.location.source_file = Some(update.logical_path.clone());
             }
+            // 跨页引用解析失败：位置已带 source_file，无需回填
+            crate::scanner::spg::scan_page_reference_failures(
+                value,
+                &update.logical_path,
+                &mut counts,
+            )?;
             counts
         }
         ParsedGraphContent::Tbl(_) => crate::scanner::spg::ScanDiagnostics::default(),

@@ -173,6 +173,74 @@ pub fn scan_raw_occurrences(value: &serde_json::Value, logical_path: &str) -> Ve
     occurrences
 }
 
+/// 页面里「引用另一个页面」的位置：`embedsuperpage` 的 `resPath` 与 `link`（app）动作的
+/// `path`，都是 `referenceResources` 的下标。建边与诊断共用本函数，保证「哪些引用会建边」
+/// 与「哪些引用记诊断」同一口径。返回 `(所属节点 id, 下标)`，id 为页面局部组件/动作 id。
+fn page_reference_sites(
+    rel_path: &str,
+    meta: &crate::superpage::SuperPageMetadata,
+) -> Vec<(String, usize)> {
+    let page = rel_path.replace('\\', "/");
+    let mut sites = Vec::new();
+    for comp in &meta.components {
+        if comp.component_type == "embedsuperpage"
+            && let Some(index) = comp
+                .res_path
+                .as_deref()
+                .and_then(|path| path.parse::<usize>().ok())
+        {
+            sites.push((format!("comp:{page}|{}", comp.id), index));
+        }
+        for action in &comp.actions {
+            if action.action_type == "link"
+                && action.target_type == "app"
+                && let Some(index) = action
+                    .path
+                    .as_deref()
+                    .and_then(|path| path.parse::<usize>().ok())
+            {
+                sites.push((format!("action:{page}|{}|{}", comp.id, action.id), index));
+            }
+        }
+    }
+    sites
+}
+
+/// 对一个页面采集「跨页引用解析不到 `.spg` 页面」的诊断。
+///
+/// 这些引用在建图时被跳过（不建边、不造 Page 节点），这里把每一处如实记下来，
+/// 让图能说明自己缺了什么。没有 `referenceResources` 的页面不会走完整解析。
+#[cfg(any(test, feature = "cli-local"))]
+pub(crate) fn scan_page_reference_failures(
+    value: &serde_json::Value,
+    logical_path: &str,
+    diags: &mut ScanDiagnostics,
+) -> Result<()> {
+    let has_references = value
+        .get("referenceResources")
+        .and_then(|v| v.as_array())
+        .is_some_and(|items| !items.is_empty());
+    if !has_references {
+        return Ok(());
+    }
+    let meta = crate::superpage::parse_superpage_from_value(value.clone())
+        .with_context(|| format!("Failed to parse {logical_path} for reference diagnostics"))?;
+    for (node_id, index) in page_reference_sites(logical_path, &meta) {
+        if let Err(reason) = resolve_reference_path(logical_path, index, &meta.reference_resources)
+        {
+            diags.record_unresolved_reference(
+                crate::output::Location {
+                    source_file: Some(logical_path.to_string()),
+                    node_id: Some(node_id),
+                    json_path: Some(format!("referenceResources[{index}]")),
+                },
+                reason.to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
 /// 对原始 SPG JSON 采集扫描诊断（未识别容器键 / 重复组件 id）。
 ///
 /// 生产路径由 indexer 按文件采集计数并持久化到 redb（`per_file_scan_diagnostic_entry` /
@@ -208,9 +276,12 @@ pub(crate) struct ScanDiagnostics {
     /// 不由 `scan_raw_counts` 产出——扫描能跑到这里说明已经解析成功了；
     /// 由 indexer 在解析阶段失败时直接构造。
     pub(crate) parse_failed: usize,
+    /// 跨页引用解析不到 `.spg` 页面的次数（只在 `scan_page_reference_failures` 里产出）。
+    pub(crate) unresolved_reference: usize,
     pub(crate) sample_unrecognized_location: Option<crate::output::Location>,
     pub(crate) sample_duplicate_location: Option<crate::output::Location>,
     pub(crate) sample_parse_failed_location: Option<crate::output::Location>,
+    pub(crate) sample_unresolved_reference_location: Option<crate::output::Location>,
     /// 解析失败的原因（serde/UTF-8 报错原文），随诊断 message 透出
     pub(crate) parse_failed_reason: Option<String>,
     /// 逐次出现的记录。新产出的诊断里，各 code 的记录数恒等于对应计数
@@ -280,6 +351,21 @@ impl ScanDiagnostics {
         }
     }
 
+    /// 记一次「跨页引用解析不到页面」：计数、首个样例与逐次记录同上。
+    fn record_unresolved_reference(&mut self, location: crate::output::Location, detail: String) {
+        self.unresolved_reference += 1;
+        if self.sample_unresolved_reference_location.is_none() {
+            self.sample_unresolved_reference_location = Some(location.clone());
+        }
+        if self.collect_occurrences {
+            self.occurrences.push(ScanOccurrence {
+                code: crate::diagnostics::CODE_SCANNER_UNRESOLVED_REFERENCE.to_string(),
+                location,
+                detail: Some(detail),
+            });
+        }
+    }
+
     /// 构造「一个文件解析失败」的诊断（由 indexer 在解析阶段失败时调用）。
     #[cfg(feature = "cli-local")]
     pub(crate) fn parse_failure(logical_path: &str, reason: &str) -> Self {
@@ -311,6 +397,11 @@ impl ScanDiagnostics {
         self.unrecognized_container_key += other.unrecognized_container_key;
         self.duplicate_component_id += other.duplicate_component_id;
         self.parse_failed += other.parse_failed;
+        self.unresolved_reference += other.unresolved_reference;
+        if self.sample_unresolved_reference_location.is_none() {
+            self.sample_unresolved_reference_location =
+                other.sample_unresolved_reference_location.clone();
+        }
         if self.sample_unrecognized_location.is_none() {
             self.sample_unrecognized_location = other.sample_unrecognized_location.clone();
         }
@@ -349,6 +440,22 @@ impl ScanDiagnostics {
                 format!(
                     "Scanner encountered {} duplicate component ids",
                     self.duplicate_component_id
+                ),
+            ));
+        }
+        if self.unresolved_reference > 0 {
+            let loc = self
+                .sample_unresolved_reference_location
+                .clone()
+                .unwrap_or_default();
+            out.push(crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_SCANNER_UNRESOLVED_REFERENCE,
+                self.unresolved_reference,
+                loc,
+                format!(
+                    "{} page reference(s) could not be resolved to a .spg page; \
+                     no edge was created for them",
+                    self.unresolved_reference
                 ),
             ));
         }
@@ -1403,7 +1510,7 @@ pub fn process_spg_file_from_value_with_identity(
         // Try to resolve resPath as integer index into referenceResources
         if let Some(ref res_path_str) = comp.res_path
             && let Ok(ref_idx) = res_path_str.parse::<usize>()
-            && let Some(target_rel) =
+            && let Ok(target_rel) =
                 resolve_reference_path(rel_path, ref_idx, &meta.reference_resources)
         {
             let target_name = Path::new(&target_rel)
@@ -1578,7 +1685,7 @@ pub fn process_spg_file_from_value_with_identity(
                     // Try to resolve path as integer index into referenceResources
                     if let Some(ref path_str) = action.path
                         && let Ok(ref_idx) = path_str.parse::<usize>()
-                        && let Some(target_rel) =
+                        && let Ok(target_rel) =
                             resolve_reference_path(rel_path, ref_idx, &meta.reference_resources)
                     {
                         let target_name = Path::new(&target_rel)
