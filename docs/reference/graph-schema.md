@@ -48,6 +48,7 @@ A data model: a physical table (.tbl), a dataflow, a model referenced by a page,
 - meta keys:
   - `modelType` (string): Model kind: App or DataFlow (a scanned .tbl), PhysicalTable (output or referenced table), dwtable (a page source bound to a table), DataFlowDependency (listed in a dataflow's depends).
   - `sourcePath` (string): Declared table path.
+  - `landed` (bool): Only present, and false, on an un-landed dataflow: a .tbl dataflow with an empty dbTableName, which fetches data on the fly and has no stored table (and no OutputsTo edge).
   - `dimensions` (array): Array of field definitions (name, dbfield, dataType, isDimension, length).
   - `embeddedIn` (string): Page name, on a dataflow embedded in a page.
   - `aliasMap` (object): Dataflow: alias to table mapping.
@@ -288,7 +289,7 @@ A link action opens another page.
   - `target_model` (string): Target page name.
 - produced by:
   - `scanner/spg.rs::process_spg_file_from_value_with_identity`: A link action with targetType app whose path is an index into referenceResources that resolves to a .spg page path: the target Page node is upserted, then Action -> Page.
-- when absent: A link whose target cannot be resolved to a page path (index out of range, an absolute path, a URI, an unknown $-prefix, a target that is not .spg) produces no edge and no Page node, and nothing in the graph marks the gap. A link whose path resolves but whose file does not exist still produces the edge, to a Page node that no scanned file backs (no file_state record). Absence is not proof there is no navigation. The query-time diagnostic UNRESOLVED_PAGE_NAVIGATION only fires for a target node that is missing from the graph, which this scanner never leaves, so it does not cover either case.
+- when absent: A link whose target cannot be resolved to a page path (index out of range, an absolute path, a URI, an unknown $-prefix, a target that is not .spg) produces no edge and no Page node; the gap is recorded as a SCANNER_UNRESOLVED_REFERENCE occurrence in the IndexState record scanner_entry:<page path> (a link with no path at all is recorded too, as a missing index). A link whose path resolves but whose file does not exist still produces the edge, to a Page node that no scanned file backs (no file_state record). Absence is not proof there is no navigation. The query-time diagnostic UNRESOLVED_PAGE_NAVIGATION only fires for a target node that is missing from the graph, which this scanner never leaves, so it does not cover either case; use the scanner_entry record.
 
 ### PassesParam
 
@@ -396,7 +397,7 @@ A component embeds another page (composition, not a user navigation).
 - meta: none
 - produced by:
   - `scanner/spg.rs::process_spg_file_from_value_with_identity`: An embedsuperpage component whose resPath is an index into referenceResources that resolves to a .spg page path: the target Page node is upserted, then Component -> Page.
-- when absent: An embed whose target cannot be resolved produces no edge and nothing in the graph marks the gap; one whose path resolves but whose file does not exist produces the edge to a Page node that no scanned file backs (no file_state record).
+- when absent: An embed whose target cannot be resolved (or has no resPath) produces no edge; the gap is recorded as a SCANNER_UNRESOLVED_REFERENCE occurrence in the IndexState record scanner_entry:<page path>. One whose path resolves but whose file does not exist produces the edge to a Page node that no scanned file backs (no file_state record).
 
 ### DependsOn
 
@@ -494,7 +495,7 @@ Declared in the enum, never written by the scanner. Dataflow internals live in t
 
 - **static-only**: The graph holds static metadata only. Runtime facts (whether a parameter is actually passed, whether a table has rows, what a user sees right now) cannot be read from it. Say 'cannot be determined from the graph' instead of guessing.
 - **hidden-is-configuration**: A component with a visibleCondition (or disableCondition) is hidden or disabled by configuration under some state. That is intended behaviour, not a rendering fault; do not report it as a defect.
-- **absent-edge-is-not-absent-relation**: A missing edge does not always mean the relation does not exist. Check the edge type's absent_when: unresolved navigation or embed targets and unrecognised expression text produce no edge.
+- **absent-edge-is-not-absent-relation**: A missing edge does not always mean the relation does not exist. Check the edge type's absent_when: unresolved navigation or embed targets (recorded in the page's scanner_entry record) and unrecognised expression text produce no edge.
 - **model-path-is-not-a-file**: A Model node's path can be a declared reference ($DATA:/dir/x.tbl, ../x.tbl), the .spg path of the page that embeds a dataflow, or a placeholder '<name>.tbl' for an output table or a model that was never resolved. Do not treat a Model path as proof that the file exists.
 - **dangling-page**: A Page node with no Contains edge is not necessarily a reference to a missing file: a scanned page with no canvas has none either. A page was scanned only if an IndexState record with key 'file_state:<path>' exists for it. A Page node without that record was created from a link or embed target, and no scanned file backs it.
 - **depends-on-is-overloaded**: DependsOn has two meanings, told apart by meta.operation: 'Conditions' means the Condition node belongs to its owner (Condition -> owner); 'DependsOn' means the source depends on the target symbol.

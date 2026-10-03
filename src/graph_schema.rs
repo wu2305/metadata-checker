@@ -284,6 +284,11 @@ const NODE_TYPES: &[NodeTypeSchema] = &[
             ),
             opt("sourcePath", Str, "Declared table path."),
             opt(
+                "landed",
+                Bool,
+                "Only present, and false, on an un-landed dataflow: a .tbl dataflow with an empty dbTableName, which fetches data on the fly and has no stored table (and no OutputsTo edge).",
+            ),
+            opt(
                 "dimensions",
                 Array,
                 "Array of field definitions (name, dbfield, dataType, isDimension, length).",
@@ -770,7 +775,7 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
             SPG,
             "A link action with targetType app whose path is an index into referenceResources that resolves to a .spg page path: the target Page node is upserted, then Action -> Page.",
         )],
-        absent_when: "A link whose target cannot be resolved to a page path (index out of range, an absolute path, a URI, an unknown $-prefix, a target that is not .spg) produces no edge and no Page node, and nothing in the graph marks the gap. A link whose path resolves but whose file does not exist still produces the edge, to a Page node that no scanned file backs (no file_state record). Absence is not proof there is no navigation. The query-time diagnostic UNRESOLVED_PAGE_NAVIGATION only fires for a target node that is missing from the graph, which this scanner never leaves, so it does not cover either case.",
+        absent_when: "A link whose target cannot be resolved to a page path (index out of range, an absolute path, a URI, an unknown $-prefix, a target that is not .spg) produces no edge and no Page node; the gap is recorded as a SCANNER_UNRESOLVED_REFERENCE occurrence in the IndexState record scanner_entry:<page path> (a link with no path at all is recorded too, as a missing index). A link whose path resolves but whose file does not exist still produces the edge, to a Page node that no scanned file backs (no file_state record). Absence is not proof there is no navigation. The query-time diagnostic UNRESOLVED_PAGE_NAVIGATION only fires for a target node that is missing from the graph, which this scanner never leaves, so it does not cover either case; use the scanner_entry record.",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::PassesParam,
@@ -930,7 +935,7 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
             SPG,
             "An embedsuperpage component whose resPath is an index into referenceResources that resolves to a .spg page path: the target Page node is upserted, then Component -> Page.",
         )],
-        absent_when: "An embed whose target cannot be resolved produces no edge and nothing in the graph marks the gap; one whose path resolves but whose file does not exist produces the edge to a Page node that no scanned file backs (no file_state record).",
+        absent_when: "An embed whose target cannot be resolved (or has no resPath) produces no edge; the gap is recorded as a SCANNER_UNRESOLVED_REFERENCE occurrence in the IndexState record scanner_entry:<page path>. One whose path resolves but whose file does not exist produces the edge to a Page node that no scanned file backs (no file_state record).",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::DependsOn,
@@ -1126,7 +1131,7 @@ const INTERPRETATION_RULES: &[InterpretationRule] = &[
     },
     InterpretationRule {
         id: "absent-edge-is-not-absent-relation",
-        rule: "A missing edge does not always mean the relation does not exist. Check the edge type's absent_when: unresolved navigation or embed targets and unrecognised expression text produce no edge.",
+        rule: "A missing edge does not always mean the relation does not exist. Check the edge type's absent_when: unresolved navigation or embed targets (recorded in the page's scanner_entry record) and unrecognised expression text produce no edge.",
     },
     InterpretationRule {
         id: "model-path-is-not-a-file",
