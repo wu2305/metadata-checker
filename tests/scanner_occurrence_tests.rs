@@ -178,13 +178,12 @@ fn records_persist_merge_in_path_order_and_retire_on_fix() -> anyhow::Result<()>
     let entries = GraphDB::open(&db_path)?.load_scanner_diagnostic_entries()?;
     let report = ProjectIndexer::merge_scanner_occurrence_entries(&entries)?;
     assert_eq!(report.occurrences.len(), 4, "{report:?}");
-    assert!(
-        report
-            .occurrences
-            .iter()
-            .all(|o| o.location.source_file.as_deref() == Some("b.spg")),
-        "{report:?}"
-    );
+    let remaining_files: Vec<_> = report
+        .occurrences
+        .iter()
+        .map(|o| o.location.source_file.as_deref())
+        .collect();
+    assert_eq!(remaining_files, vec![Some("b.spg"); 4], "{report:?}");
 
     let _ = std::fs::remove_dir_all(&project_dir);
     Ok(())
@@ -227,8 +226,9 @@ fn corrupt_entry_is_an_error_with_path() {
     let entries = vec![("broken.spg".to_string(), b"not json".to_vec())];
     let error = ProjectIndexer::merge_scanner_occurrence_entries(&entries)
         .expect_err("损坏的 entry 必须报错");
-    assert!(
+    assert_eq!(
         format!("{error:#}").contains("broken.spg"),
+        true,
         "错误应带上出问题的文件路径: {error:#}"
     );
 }
@@ -258,11 +258,12 @@ fn parse_failure_has_a_record_and_retires_when_fixed() -> anyhow::Result<()> {
         .collect();
     assert_eq!(failed.len(), 1, "{report:?}");
     assert_eq!(failed[0].location.source_file.as_deref(), Some("bad.tbl"));
-    assert!(
+    assert_eq!(
         failed[0]
             .detail
             .as_deref()
             .is_some_and(|detail| detail.contains("bad.tbl")),
+        true,
         "detail 应带文件名与失败原因: {:?}",
         failed[0]
     );

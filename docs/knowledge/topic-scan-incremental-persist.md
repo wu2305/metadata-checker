@@ -118,6 +118,15 @@ IndexCommit { file_states, dirty_nodes, deleted_nodes, checkpoint, delta, scanne
 | `SCANNER_DIAGNOSTICS_REFRESH_FAILED` | diff-refresh 侧刷新失败 |
 
 - per-file 计数序列化为 bytes，随 `IndexCommit.scanner_entries` **与图同事务落库**（`src/scanner/indexer.rs:134`）。
+- **逐次记录（`ScanOccurrence`，本条以 `ca78740` 为准，行号未逐条核验）**：除计数和每类首个样例外，per-file entry
+  还带 `occurrences`——每处出现一条 `{code, location{source_file,node_id,json_path}, detail}`。
+  由 `ScanDiagnostics::record_unrecognized` / `record_duplicate` 与计数同步维护，解析失败走 `ScanDiagnostics::parse_failure`。
+  读取走 `ProjectIndexer::merge_scanner_occurrence_entries`（路径字典序、文件内出现顺序）。
+  **聚合信封不读它**：`ScanDiagnostics::merge` 不合并记录，全库聚合内存不随出现次数增长；
+  只构造组件上下文的遍历（`collect_component_contexts`）关闭记录构造，不白分配。
+  **旧库 entry 没有 `occurrences`**（`#[serde(default)]`）：聚合照常，逐次接口把这些文件列入 `legacy_files`，
+  不当作「无诊断」；该文件重新解析后补齐。损坏 entry 报错并带路径。
+  覆盖测试：`tests/scanner_occurrence_tests.rs`。
 - 删除文件与「对账出的陈旧路径」经 `scanner_deleted_paths` 同事务移除（`src/scanner/indexer.rs:221`、`src/scanner/indexer.rs:250`）。
 - **陈旧对账是当前已实现的修复机制，不是未修复缺陷**。
   `stale_scanner_diagnostic_paths`（`src/scanner/indexer.rs:221`）处理两个场景：

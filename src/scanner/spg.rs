@@ -147,7 +147,7 @@ fn collect_component_contexts(
 /// 对原始 SPG JSON 采集扫描诊断计数（未识别容器键 / 重复组件 id）。
 #[cfg(any(test, feature = "cli-local"))]
 pub(crate) fn scan_raw_counts(value: &serde_json::Value) -> ScanDiagnostics {
-    let mut diags = ScanDiagnostics::default();
+    let mut diags = ScanDiagnostics::collecting();
     if let Some(canvas) = value.get("canvas") {
         collect_component_contexts_inner_with_context_and_diagnostics(
             canvas,
@@ -216,33 +216,68 @@ pub(crate) struct ScanDiagnostics {
     /// 逐次出现的记录。新产出的诊断里，各 code 的记录数恒等于对应计数
     /// （由 `record_*` 同时维护）；旧库 entry 没有这个字段，反序列化为空。
     pub(crate) occurrences: Vec<ScanOccurrence>,
+    /// 是否构造逐次记录。只要组件上下文的遍历（`collect_component_contexts`）
+    /// 不消费记录，关掉它避免白分配；`scan_raw_counts` 打开。
+    pub(crate) collect_occurrences: bool,
 }
 
 impl ScanDiagnostics {
-    /// 记一次「未识别容器键 / 对象形态」：同时维护计数、首个样例与逐次记录。
-    fn record_unrecognized(&mut self, location: crate::output::Location, detail: String) {
-        self.unrecognized_container_key += 1;
-        if self.sample_unrecognized_location.is_none() {
-            self.sample_unrecognized_location = Some(location.clone());
+    /// 打开逐次记录的构造；默认关闭，见 `collect_occurrences`。
+    #[cfg(any(test, feature = "cli-local"))]
+    fn collecting() -> Self {
+        Self {
+            collect_occurrences: true,
+            ..Default::default()
         }
-        self.occurrences.push(ScanOccurrence {
-            code: crate::diagnostics::CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY.to_string(),
-            location,
-            detail: Some(detail),
-        });
     }
 
-    /// 记一次「重复组件 id」：同时维护计数、首个样例与逐次记录。
-    fn record_duplicate(&mut self, location: crate::output::Location, detail: String) {
+    /// 记一次「未识别容器键 / 对象形态」：同时维护计数、首个样例与逐次记录。
+    /// 位置与说明用闭包延迟构造，只在有消费者（样例或记录）时才分配。
+    fn record_unrecognized(
+        &mut self,
+        location: impl FnOnce() -> crate::output::Location,
+        detail: impl FnOnce() -> String,
+    ) {
+        self.unrecognized_container_key += 1;
+        let need_sample = self.sample_unrecognized_location.is_none();
+        if !need_sample && !self.collect_occurrences {
+            return;
+        }
+        let location = location();
+        if need_sample {
+            self.sample_unrecognized_location = Some(location.clone());
+        }
+        if self.collect_occurrences {
+            self.occurrences.push(ScanOccurrence {
+                code: crate::diagnostics::CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY.to_string(),
+                location,
+                detail: Some(detail()),
+            });
+        }
+    }
+
+    /// 记一次「重复组件 id」：同时维护计数、首个样例与逐次记录（延迟构造同上）。
+    fn record_duplicate(
+        &mut self,
+        location: impl FnOnce() -> crate::output::Location,
+        detail: impl FnOnce() -> String,
+    ) {
         self.duplicate_component_id += 1;
-        if self.sample_duplicate_location.is_none() {
+        let need_sample = self.sample_duplicate_location.is_none();
+        if !need_sample && !self.collect_occurrences {
+            return;
+        }
+        let location = location();
+        if need_sample {
             self.sample_duplicate_location = Some(location.clone());
         }
-        self.occurrences.push(ScanOccurrence {
-            code: crate::diagnostics::CODE_SCANNER_DUPLICATE_COMPONENT_ID.to_string(),
-            location,
-            detail: Some(detail),
-        });
+        if self.collect_occurrences {
+            self.occurrences.push(ScanOccurrence {
+                code: crate::diagnostics::CODE_SCANNER_DUPLICATE_COMPONENT_ID.to_string(),
+                location,
+                detail: Some(detail()),
+            });
+        }
     }
 
     /// 构造「一个文件解析失败」的诊断（由 indexer 在解析阶段失败时调用）。
@@ -267,7 +302,10 @@ impl ScanDiagnostics {
         }
     }
 
-    /// 合并另一份计数（跨文件聚合；样本位置保留首个非空，逐次记录按顺序追加）。
+    /// 合并另一份计数（跨文件聚合；样本位置保留首个非空）。
+    ///
+    /// **不合并逐次记录**：聚合信封用不到它们，全库累加会让常驻内存随出现次数增长；
+    /// 需要逐次记录的调用方走 `merge_scanner_occurrence_entries`。
     #[cfg(any(test, feature = "cli-local"))]
     pub(crate) fn merge(&mut self, other: &ScanDiagnostics) {
         self.unrecognized_container_key += other.unrecognized_container_key;
@@ -283,7 +321,6 @@ impl ScanDiagnostics {
             self.sample_parse_failed_location = other.sample_parse_failed_location.clone();
             self.parse_failed_reason = other.parse_failed_reason.clone();
         }
-        self.occurrences.extend(other.occurrences.iter().cloned());
     }
 
     pub(crate) fn to_diagnostics(&self) -> Vec<crate::output::Diagnostic> {
@@ -369,12 +406,12 @@ fn collect_component_contexts_inner_with_context_and_diagnostics(
     let is_component = current_id.is_some() && has_type;
     if current_id.is_some() && !has_type {
         diagnostics.record_unrecognized(
-            crate::output::Location {
+            || crate::output::Location {
                 source_file: None,
                 node_id: current_id.clone(),
                 json_path: Some(json_path.to_string()),
             },
-            "object has an id but no type, so it is not treated as a component".to_string(),
+            || "object has an id but no type, so it is not treated as a component".to_string(),
         );
     }
 
@@ -399,12 +436,12 @@ fn collect_component_contexts_inner_with_context_and_diagnostics(
     if is_component && let Some(id) = &current_id {
         if contexts.contains_key(id) {
             diagnostics.record_duplicate(
-                crate::output::Location {
+                || crate::output::Location {
                     source_file: None,
                     node_id: Some(id.clone()),
                     json_path: Some(json_path.to_string()),
                 },
-                "component id was already seen earlier on this page".to_string(),
+                || "component id was already seen earlier on this page".to_string(),
             );
         }
         contexts.insert(
@@ -487,14 +524,16 @@ fn collect_component_contexts_inner_with_context_and_diagnostics(
             let has_object = arr.iter().any(|item| item.is_object());
             if has_object {
                 diagnostics.record_unrecognized(
-                    crate::output::Location {
+                    || crate::output::Location {
                         source_file: None,
                         node_id: current_id.clone(),
                         json_path: Some(format!("{}.{}", json_path, key)),
                     },
-                    format!(
-                        "array under key '{key}' mixes objects that are not components, so it was skipped"
-                    ),
+                    || {
+                        format!(
+                            "array under key '{key}' mixes objects that are not components, so it was skipped"
+                        )
+                    },
                 );
             }
         }
@@ -2190,4 +2229,50 @@ pub fn process_spg_file_from_value_with_identity(
     let mut node_ids: Vec<String> = node_ids.into_iter().collect();
     node_ids.sort_unstable();
     Ok(node_ids)
+}
+
+#[cfg(test)]
+mod occurrence_tests {
+    use super::*;
+
+    fn page_with_problems() -> serde_json::Value {
+        serde_json::json!({
+            "canvas": {"components": [
+                {"id": "loose"},
+                {"id": "dup1", "type": "button"},
+                {"id": "dup1", "type": "input"}
+            ]}
+        })
+    }
+
+    /// 只构造组件上下文的遍历不构造逐次记录，但计数照常（避免白分配）。
+    #[test]
+    fn context_only_pass_counts_without_building_records() {
+        let mut diags = ScanDiagnostics::default();
+        let mut contexts = std::collections::HashMap::new();
+        collect_component_contexts_inner_with_context_and_diagnostics(
+            &page_with_problems()["canvas"],
+            "canvas",
+            None,
+            None,
+            &mut contexts,
+            &mut diags,
+        );
+        assert_eq!(diags.unrecognized_container_key, 1);
+        assert_eq!(diags.duplicate_component_id, 1);
+        assert_eq!(diags.occurrences.len(), 0);
+    }
+
+    /// 跨文件聚合只累加计数与样例，不搬运逐次记录（全库常驻内存不随出现次数增长）。
+    #[test]
+    fn merge_does_not_carry_records() {
+        let one_file = scan_raw_counts(&page_with_problems());
+        assert_eq!(one_file.occurrences.len(), 2);
+        let mut acc = ScanDiagnostics::default();
+        acc.merge(&one_file);
+        acc.merge(&one_file);
+        assert_eq!(acc.unrecognized_container_key, 2);
+        assert_eq!(acc.duplicate_component_id, 2);
+        assert_eq!(acc.occurrences.len(), 0);
+    }
 }

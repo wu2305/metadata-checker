@@ -339,6 +339,7 @@ impl FileScanDiagnostics {
             sample_parse_failed_location: self.sample_parse_failed_location,
             parse_failed_reason: self.parse_failed_reason,
             occurrences: self.occurrences,
+            ..Default::default()
         }
     }
 }
