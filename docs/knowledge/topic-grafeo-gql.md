@@ -9,7 +9,8 @@
 - **问：GQL 能读本地文件吗？** 答：不能。`LOAD CSV` / `LOAD DATA` 被形态闸拒绝；引擎自己的只读会话**会放行**它，所以形态闸不可去掉。
 - **问：要开 `lpg` 吗？** 答：不要。GQL 来自 `edge` 特性集已带上的 `gql`；`lpg` 只多出 Cypher / Gremlin / SQL-PGQ 解析器与完整 regex，C4 用不到。
 - **图结构**：节点只有一个标签 `Node`，属性 `id / node_type / path / name / meta / origin_file`；边类型名就是 `EdgeType` 变体名（如 `Reads`、`Contains`、`Triggers`），属性 `field_path / meta / origin_file`。`meta` 是 JSON **文本**，不是 map。
-- **问：LLM 写 GQL 前要知道什么？** 答：`--help`（`--gql` 的 long help）写明了 id 格式、各 `node_type` 的 `meta` 键、边 `meta` 键，以及方言差异（多边类型写 `[:A|B]`，无 `=~`、无 `CONTAINS()` 函数形式、无 `NOT (n)--()` 模式谓词）；`tests/m59_c4_grafeo_gql_tests.rs::gql_long_help_claims_hold_against_a_real_graph` 在真实图上验证这些说法。
+- **问：LLM 写 GQL 前要知道什么？** 答：运行 `--graph-schema`（JSON；`--human` 为 Markdown）。它由 `src/graph_schema.rs` 的契约表生成，列出 id 格式、各 `node_type` 的 `meta` 键、每种边的端点组合与 `field_path` 含义、「边缺席何时不代表关系不存在」、解释规则与方言差异（多边类型写 `[:A|B]`，无 `=~`、无 `CONTAINS()` 函数形式、无 `NOT (n)--()` 模式谓词）；`--gql` 的 long help 是它的紧凑版。`tests/graph_schema_tests.rs` 在真实夹具图上逐元素核对契约，`gql_long_help_claims_hold_against_a_real_graph` 验方言说法。
+- **问：哪些边类型在枚举里但扫描器从不写？** 答：`OpensPage`、`SetsParam`、`DataflowInternal`（契约表 `emitted = false`）；页面跳转实际是 `ActionNavigates`，参数赋值是 `ActionSetsParam`，参数传递是 `PassesParam`。
 
 ## 1. 当前实现
 
