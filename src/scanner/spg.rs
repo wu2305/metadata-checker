@@ -1,4 +1,6 @@
-use super::{add_edge_with_meta, add_identified_node, add_node, resolve_reference_path};
+use super::{
+    ReferenceUnresolved, add_edge_with_meta, add_identified_node, add_node, resolve_reference_path,
+};
 use crate::graph::{EdgeType, NodeType};
 use crate::graph_store::GraphWriteStore;
 use anyhow::{Context, Result};
@@ -173,6 +175,82 @@ pub fn scan_raw_occurrences(value: &serde_json::Value, logical_path: &str) -> Ve
     occurrences
 }
 
+/// 页面里「引用另一个页面」的位置：`embedsuperpage` 的 `resPath` 与 `link`（app）动作的
+/// `path`，都应是 `referenceResources` 的下标。建边与诊断共用本函数，保证「哪些引用会建边」
+/// 与「哪些引用记诊断」同一口径。返回 `(所属节点 id, 原始下标文本)`，id 为页面局部组件/动作 id；
+/// 下标文本不一定能解析为数字，link 动作还可能没有下标（`None`）——这些同样是一处无法解析的引用，由诊断侧记录。
+fn page_reference_sites(
+    rel_path: &str,
+    meta: &crate::superpage::SuperPageMetadata,
+) -> Vec<(String, Option<String>)> {
+    let page = rel_path.replace('\\', "/");
+    let mut sites = Vec::new();
+    for comp in &meta.components {
+        if comp.component_type == "embedsuperpage" {
+            // 没有 resPath 的内嵌页同样没有目标，不建 EmbedsPage 边，要如实记诊断
+            sites.push((format!("comp:{page}|{}", comp.id), comp.res_path.clone()));
+        }
+        for action in &comp.actions {
+            // link(app) 没有下标（`path` 缺失或为 null）同样是一处没有目标的跳转：
+            // 语料里有未配置完成的 link 动作，图要能说明这里缺了目标。
+            if action.action_type == "link" && action.target_type == "app" {
+                sites.push((
+                    format!("action:{page}|{}|{}", comp.id, action.id),
+                    action.path.clone(),
+                ));
+            }
+        }
+    }
+    sites
+}
+
+/// 对一个页面采集「跨页引用解析不到 `.spg` 页面」的诊断。
+///
+/// 这些引用在建图时被跳过（不建边、不造 Page 节点），这里把每一处如实记下来，
+/// 让图能说明自己缺了什么。`referenceResources` 缺失或为空时仍要走：此时任何下标都越界，
+/// 建图同样会跳过，必须记诊断。
+#[cfg(any(test, feature = "cli-local"))]
+pub(crate) fn scan_page_reference_failures(
+    value: &serde_json::Value,
+    logical_path: &str,
+    diags: &mut ScanDiagnostics,
+) -> Result<()> {
+    let meta = crate::superpage::parse_superpage_from_value(value.clone())
+        .with_context(|| format!("Failed to parse {logical_path} for reference diagnostics"))?;
+    for (node_id, raw_index) in page_reference_sites(logical_path, &meta) {
+        let (json_path, outcome) = match &raw_index {
+            None => (
+                "resPath/path".to_string(),
+                Err(ReferenceUnresolved::MissingIndex),
+            ),
+            Some(text) => match text.parse::<usize>() {
+                Ok(index) => (
+                    format!("referenceResources[{index}]"),
+                    resolve_reference_path(logical_path, index, &meta.reference_resources),
+                ),
+                Err(_) => (
+                    // 下标本身不是数字：位置只能指向持有它的节点
+                    "resPath/path".to_string(),
+                    Err(ReferenceUnresolved::MalformedIndex {
+                        value: text.clone(),
+                    }),
+                ),
+            },
+        };
+        if let Err(reason) = outcome {
+            diags.record_unresolved_reference(
+                crate::output::Location {
+                    source_file: Some(logical_path.to_string()),
+                    node_id: Some(node_id),
+                    json_path: Some(json_path),
+                },
+                reason.to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
 /// 对原始 SPG JSON 采集扫描诊断（未识别容器键 / 重复组件 id）。
 ///
 /// 生产路径由 indexer 按文件采集计数并持久化到 redb（`per_file_scan_diagnostic_entry` /
@@ -208,9 +286,12 @@ pub(crate) struct ScanDiagnostics {
     /// 不由 `scan_raw_counts` 产出——扫描能跑到这里说明已经解析成功了；
     /// 由 indexer 在解析阶段失败时直接构造。
     pub(crate) parse_failed: usize,
+    /// 跨页引用解析不到 `.spg` 页面的次数（只在 `scan_page_reference_failures` 里产出）。
+    pub(crate) unresolved_reference: usize,
     pub(crate) sample_unrecognized_location: Option<crate::output::Location>,
     pub(crate) sample_duplicate_location: Option<crate::output::Location>,
     pub(crate) sample_parse_failed_location: Option<crate::output::Location>,
+    pub(crate) sample_unresolved_reference_location: Option<crate::output::Location>,
     /// 解析失败的原因（serde/UTF-8 报错原文），随诊断 message 透出
     pub(crate) parse_failed_reason: Option<String>,
     /// 逐次出现的记录。新产出的诊断里，各 code 的记录数恒等于对应计数
@@ -280,6 +361,21 @@ impl ScanDiagnostics {
         }
     }
 
+    /// 记一次「跨页引用解析不到页面」：计数、首个样例与逐次记录同上。
+    fn record_unresolved_reference(&mut self, location: crate::output::Location, detail: String) {
+        self.unresolved_reference += 1;
+        if self.sample_unresolved_reference_location.is_none() {
+            self.sample_unresolved_reference_location = Some(location.clone());
+        }
+        if self.collect_occurrences {
+            self.occurrences.push(ScanOccurrence {
+                code: crate::diagnostics::CODE_SCANNER_UNRESOLVED_REFERENCE.to_string(),
+                location,
+                detail: Some(detail),
+            });
+        }
+    }
+
     /// 构造「一个文件解析失败」的诊断（由 indexer 在解析阶段失败时调用）。
     #[cfg(feature = "cli-local")]
     pub(crate) fn parse_failure(logical_path: &str, reason: &str) -> Self {
@@ -311,6 +407,11 @@ impl ScanDiagnostics {
         self.unrecognized_container_key += other.unrecognized_container_key;
         self.duplicate_component_id += other.duplicate_component_id;
         self.parse_failed += other.parse_failed;
+        self.unresolved_reference += other.unresolved_reference;
+        if self.sample_unresolved_reference_location.is_none() {
+            self.sample_unresolved_reference_location =
+                other.sample_unresolved_reference_location.clone();
+        }
         if self.sample_unrecognized_location.is_none() {
             self.sample_unrecognized_location = other.sample_unrecognized_location.clone();
         }
@@ -349,6 +450,22 @@ impl ScanDiagnostics {
                 format!(
                     "Scanner encountered {} duplicate component ids",
                     self.duplicate_component_id
+                ),
+            ));
+        }
+        if self.unresolved_reference > 0 {
+            let loc = self
+                .sample_unresolved_reference_location
+                .clone()
+                .unwrap_or_default();
+            out.push(crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_SCANNER_UNRESOLVED_REFERENCE,
+                self.unresolved_reference,
+                loc,
+                format!(
+                    "{} page reference(s) could not be resolved to a .spg page; \
+                     no edge was created for them",
+                    self.unresolved_reference
                 ),
             ));
         }
@@ -1403,7 +1520,7 @@ pub fn process_spg_file_from_value_with_identity(
         // Try to resolve resPath as integer index into referenceResources
         if let Some(ref res_path_str) = comp.res_path
             && let Ok(ref_idx) = res_path_str.parse::<usize>()
-            && let Some(target_rel) =
+            && let Ok(target_rel) =
                 resolve_reference_path(rel_path, ref_idx, &meta.reference_resources)
         {
             let target_name = Path::new(&target_rel)
@@ -1575,70 +1692,88 @@ pub fn process_spg_file_from_value_with_identity(
                     }
                 }
                 "link" if action.target_type.as_str() == "app" => {
-                    // Try to resolve path as integer index into referenceResources
-                    if let Some(ref path_str) = action.path
-                        && let Ok(ref_idx) = path_str.parse::<usize>()
-                        && let Some(target_rel) =
-                            resolve_reference_path(rel_path, ref_idx, &meta.reference_resources)
+                    // path 是 referenceResources 的下标；解析不了时没有目标页面可连，
+                    // 但参数表达式里的模型读取与目标无关，仍要入图（诊断由
+                    // `scan_page_reference_failures` 记录）。
+                    // path 缺失（或为 null）与解析失败同样处理：没有目标，但读取照常提取。
                     {
-                        let target_name = Path::new(&target_rel)
-                            .file_stem()
-                            .map(|s| s.to_string_lossy().to_string())
-                            .unwrap_or_else(|| target_rel.clone());
-                        let target_page_id = format!("page:{}", target_rel.replace(r"\", "/"));
-                        add_node(
-                            graph,
-                            target_page_id.clone(),
-                            NodeType::Page,
-                            target_rel.clone(),
-                            target_name.clone(),
-                            None,
-                        )?;
-                        let opens_meta = serde_json::json!({
-                            "reason": format!("Link action opens page '{}'", target_name),
-                            "actor_kind": "action",
-                            "actor_id": action_id,
-                            "operation": "ActionNavigates",
-                            "trigger": action.trigger_type,
-                            "target_model": target_name,
+                        let resolved_target = action
+                            .path
+                            .as_deref()
+                            .and_then(|path_str| path_str.parse::<usize>().ok())
+                            .and_then(|ref_idx| {
+                                resolve_reference_path(rel_path, ref_idx, &meta.reference_resources)
+                                    .ok()
+                            });
+                        let target_name = resolved_target.as_ref().map(|target_rel| {
+                            Path::new(target_rel)
+                                .file_stem()
+                                .map(|s| s.to_string_lossy().to_string())
+                                .unwrap_or_else(|| target_rel.clone())
                         });
-                        add_edge_with_meta(
-                            graph,
-                            &action_id,
-                            &target_page_id,
-                            EdgeType::ActionNavigates,
-                            Some(target_rel.clone()),
-                            Some(opens_meta),
-                        )?;
-
-                        // Process parameter passing via data array
-                        for (param_name, param_value) in &action.data {
-                            let param_id = format!("param:{}/{}", target_name, param_name);
+                        if let (Some(target_rel), Some(target_name)) =
+                            (&resolved_target, &target_name)
+                        {
+                            let target_page_id = format!("page:{}", target_rel.replace(r"\", "/"));
                             add_node(
                                 graph,
-                                param_id.clone(),
-                                NodeType::Field,
+                                target_page_id.clone(),
+                                NodeType::Page,
                                 target_rel.clone(),
-                                param_name.clone(),
+                                target_name.clone(),
                                 None,
                             )?;
-                            let pass_meta = serde_json::json!({
-                                "reason": format!("Link action passes param '{}'", param_name),
+                            let opens_meta = serde_json::json!({
+                                "reason": format!("Link action opens page '{}'", target_name),
                                 "actor_kind": "action",
                                 "actor_id": action_id,
-                                "operation": "PassesParam",
+                                "operation": "ActionNavigates",
                                 "trigger": action.trigger_type,
-                                "target_field": param_name,
-                                "source_expr": param_value,
+                                "target_model": target_name,
                             });
                             add_edge_with_meta(
                                 graph,
                                 &action_id,
-                                &param_id,
-                                EdgeType::PassesParam,
-                                Some(param_value.clone()),
-                                Some(pass_meta),
+                                &target_page_id,
+                                EdgeType::ActionNavigates,
+                                Some(target_rel.clone()),
+                                Some(opens_meta),
                             )?;
+                        }
+
+                        // Process parameter passing via data array
+                        for (param_name, param_value) in &action.data {
+                            // 参数节点与 PassesParam 边挂在目标页面名下，目标解析不了就没有
+                            if let (Some(target_rel), Some(target_name)) =
+                                (&resolved_target, &target_name)
+                            {
+                                let param_id = format!("param:{}/{}", target_name, param_name);
+                                add_node(
+                                    graph,
+                                    param_id.clone(),
+                                    NodeType::Field,
+                                    target_rel.clone(),
+                                    param_name.clone(),
+                                    None,
+                                )?;
+                                let pass_meta = serde_json::json!({
+                                    "reason": format!("Link action passes param '{}'", param_name),
+                                    "actor_kind": "action",
+                                    "actor_id": action_id,
+                                    "operation": "PassesParam",
+                                    "trigger": action.trigger_type,
+                                    "target_field": param_name,
+                                    "source_expr": param_value,
+                                });
+                                add_edge_with_meta(
+                                    graph,
+                                    &action_id,
+                                    &param_id,
+                                    EdgeType::PassesParam,
+                                    Some(param_value.clone()),
+                                    Some(pass_meta),
+                                )?;
+                            }
                             // Parse expression refs from param_value for dependency analysis
                             let refs = crate::superpage::parse_expression_refs(param_value);
                             for ref_type in refs {

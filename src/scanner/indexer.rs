@@ -37,6 +37,21 @@ pub struct IndexPlan {
 }
 
 /// 已解析待写图更新项
+/// 扫描语义版本：同一份源文件内容会被扫成不同的图/诊断时必须递增。
+///
+/// 增量扫描只比较文件指纹，内容没变就跳过解析；若规则变了而指纹不变，升级后的旧图
+/// 会一直保留旧规则的结果。把版本折进指纹，升级后每个文件第一次扫描都判为脏、
+/// 按新规则重建一次。
+/// - 2：跨页引用按前缀解析且不造幽灵 Page；空 `dbTableName` 不再中止（`landed: false`）。
+const SCANNER_SEMANTICS_VERSION: u32 = 2;
+
+/// 文件内容指纹：`s<扫描语义版本>-<内容 xxhash>`，见 [`SCANNER_SEMANTICS_VERSION`]。
+fn content_fingerprint(content_bytes: &[u8]) -> String {
+    let mut hasher = XxHash64::default();
+    hasher.write(content_bytes);
+    format!("s{SCANNER_SEMANTICS_VERSION}-{:x}", hasher.finish())
+}
+
 #[derive(Debug)]
 pub struct ParsedGraphUpdate {
     /// 逻辑路径（相对项目路径）
@@ -296,6 +311,11 @@ struct FileScanDiagnostics {
     parse_failed: usize,
     sample_unrecognized_location: Option<crate::output::Location>,
     sample_duplicate_location: Option<crate::output::Location>,
+    /// 旧库 entry 没有以下两个字段，`#[serde(default)]` 读作 0 / None。
+    #[serde(default)]
+    unresolved_reference: usize,
+    #[serde(default)]
+    sample_unresolved_reference_location: Option<crate::output::Location>,
     #[serde(default)]
     sample_parse_failed_location: Option<crate::output::Location>,
     #[serde(default)]
@@ -310,7 +330,10 @@ impl FileScanDiagnostics {
     /// 旧版本写入的 entry：有计数却没有逐次记录。聚合信封仍可用，
     /// 但不能据此把诊断挂到具体节点；重新解析该文件后才会补齐。
     fn lacks_occurrences(&self) -> bool {
-        self.unrecognized_container_key + self.duplicate_component_id + self.parse_failed
+        self.unrecognized_container_key
+            + self.duplicate_component_id
+            + self.parse_failed
+            + self.unresolved_reference
             > self.occurrences.len()
     }
 
@@ -320,6 +343,10 @@ impl FileScanDiagnostics {
             unrecognized_container_key: counts.unrecognized_container_key,
             duplicate_component_id: counts.duplicate_component_id,
             parse_failed: counts.parse_failed,
+            unresolved_reference: counts.unresolved_reference,
+            sample_unresolved_reference_location: counts
+                .sample_unresolved_reference_location
+                .clone(),
             sample_unrecognized_location: counts.sample_unrecognized_location.clone(),
             sample_duplicate_location: counts.sample_duplicate_location.clone(),
             sample_parse_failed_location: counts.sample_parse_failed_location.clone(),
@@ -334,6 +361,8 @@ impl FileScanDiagnostics {
             unrecognized_container_key: self.unrecognized_container_key,
             duplicate_component_id: self.duplicate_component_id,
             parse_failed: self.parse_failed,
+            unresolved_reference: self.unresolved_reference,
+            sample_unresolved_reference_location: self.sample_unresolved_reference_location,
             sample_unrecognized_location: self.sample_unrecognized_location,
             sample_duplicate_location: self.sample_duplicate_location,
             sample_parse_failed_location: self.sample_parse_failed_location,
@@ -367,6 +396,12 @@ fn per_file_scan_diagnostic_entry(update: &ParsedGraphUpdate) -> Result<Option<(
             for occurrence in &mut counts.occurrences {
                 occurrence.location.source_file = Some(update.logical_path.clone());
             }
+            // 跨页引用解析失败：位置已带 source_file，无需回填
+            crate::scanner::spg::scan_page_reference_failures(
+                value,
+                &update.logical_path,
+                &mut counts,
+            )?;
             counts
         }
         ParsedGraphContent::Tbl(_) => crate::scanner::spg::ScanDiagnostics::default(),
@@ -634,9 +669,7 @@ impl ProjectIndexer {
             current_paths.insert(rel.clone(), path.clone());
 
             let content_bytes = provider.read_bytes(path)?;
-            let mut hasher = XxHash64::default();
-            hasher.write(&content_bytes);
-            let file_hash = format!("{:x}", hasher.finish());
+            let file_hash = content_fingerprint(&content_bytes);
 
             discovered_count += 1;
 
@@ -702,9 +735,7 @@ impl ProjectIndexer {
             };
 
             let (file_hash, mtime, size) = {
-                let mut hasher = XxHash64::default();
-                hasher.write(&content_bytes);
-                let hash = format!("{:x}", hasher.finish());
+                let hash = content_fingerprint(&content_bytes);
 
                 let metadata = provider.metadata(path)?;
                 let mtime = metadata
