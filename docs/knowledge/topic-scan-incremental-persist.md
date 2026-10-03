@@ -129,7 +129,7 @@ IndexCommit { file_states, dirty_nodes, deleted_nodes, checkpoint, delta, scanne
   不当作「无诊断」；该文件重新解析后补齐。损坏 entry 报错并带路径。
   覆盖测试：`tests/scanner_occurrence_tests.rs`。
 - **跨页引用解析（本条以本次提交为准，行号未逐条核验）**：`resolve_reference_target`（`src/scanner/utils.rs`）按前缀展开：`$TAPP:` = 当前应用目录（`app/<x>.app/`），
-  `$APP:` = `app/`，`$ANA:` / `$DATA:` = 项目根同级目录，无前缀 = 相对当前文件并归一 `..`；绝对路径、未知前缀、越出根、目标非 `.spg`、下标越界一律 `ReferenceUnresolved`。`$APP:` / `$ANA:` / `$DATA:` 以项目根为锚（根取 `app/<x>.app` 之前的段，不在应用下时取第一个 `ana`/`data` 目录段之前的段，都没有才 `NoAppRoot`）；`$TAPP:` 必须有当前应用。link(app) 没有 `path`（缺失或 null）记 `MissingIndex`，autocrm 里有 27 处这样的未配置完成的 link。
+  `$APP:` = `app/`，`$ANA:` / `$DATA:` = 项目根同级目录，无前缀 = 相对当前文件并归一 `..`；绝对路径、未知前缀、越出根、目标非 `.spg`、下标越界一律 `ReferenceUnresolved`。`$APP:` / `$ANA:` / `$DATA:` 以项目根为锚（根取 `app/<x>.app` 之前的段，不在应用下时取第一个 `ana`/`data` 目录段之前的段，都没有才 `NoAppRoot`）；`$TAPP:` 必须有当前应用。link(app) 没有 `path`、embedsuperpage 没有 `resPath`（缺失或 null）记 `MissingIndex`，autocrm 里有 27 处这样的未配置完成的 link。
   建边与诊断共用 `page_reference_sites`，诊断由 `scan_page_reference_failures` 在 per-file entry 里采集。仍可能留下指向磁盘上不存在文件的 Page 节点（解析正确但目标缺失），
   需要文件集合才能判定，尚未处理。
   **升级遗留**：文件指纹带 `SCANNER_SEMANTICS_VERSION`（`s2-` 前缀，`src/scanner/indexer.rs`），升级后每个文件首次扫描判脏并按新规则重建；

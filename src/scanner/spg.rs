@@ -186,10 +186,9 @@ fn page_reference_sites(
     let page = rel_path.replace('\\', "/");
     let mut sites = Vec::new();
     for comp in &meta.components {
-        if comp.component_type == "embedsuperpage"
-            && let Some(raw_index) = &comp.res_path
-        {
-            sites.push((format!("comp:{page}|{}", comp.id), Some(raw_index.clone())));
+        if comp.component_type == "embedsuperpage" {
+            // 没有 resPath 的内嵌页同样没有目标，不建 EmbedsPage 边，要如实记诊断
+            sites.push((format!("comp:{page}|{}", comp.id), comp.res_path.clone()));
         }
         for action in &comp.actions {
             // link(app) 没有下标（`path` 缺失或为 null）同样是一处没有目标的跳转：
@@ -220,7 +219,10 @@ pub(crate) fn scan_page_reference_failures(
         .with_context(|| format!("Failed to parse {logical_path} for reference diagnostics"))?;
     for (node_id, raw_index) in page_reference_sites(logical_path, &meta) {
         let (json_path, outcome) = match &raw_index {
-            None => ("path".to_string(), Err(ReferenceUnresolved::MissingIndex)),
+            None => (
+                "resPath/path".to_string(),
+                Err(ReferenceUnresolved::MissingIndex),
+            ),
             Some(text) => match text.parse::<usize>() {
                 Ok(index) => (
                     format!("referenceResources[{index}]"),

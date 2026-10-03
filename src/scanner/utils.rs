@@ -97,7 +97,7 @@ pub fn add_edge_with_meta(
 pub enum ReferenceUnresolved {
     /// `referenceResources` 里没有这个下标
     IndexOutOfRange { index: usize, len: usize },
-    /// link 动作没有填写目标下标（`path` 缺失或为 null）：配置不完整，没有可连的页面
+    /// 引用没有填写目标下标（link 的 `path` 或内嵌页的 `resPath` 缺失或为 null）：配置不完整，没有可连的页面
     MissingIndex,
     /// `resPath` / `path` 不是合法的非负整数下标（如 `"abc"`、`-1`）
     MalformedIndex { value: String },
@@ -122,7 +122,9 @@ impl std::fmt::Display for ReferenceUnresolved {
                 f,
                 "referenceResources index {index} is out of range (len {len})"
             ),
-            Self::MissingIndex => write!(f, "link action has no target index (path is missing)"),
+            Self::MissingIndex => {
+                write!(f, "reference has no target index (path/resPath is missing)")
+            }
             Self::MalformedIndex { value } => write!(
                 f,
                 "reference index is not a non-negative integer: {value:?}"

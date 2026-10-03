@@ -622,14 +622,15 @@ fn link_action_without_path_keeps_action_reads_from_parameters() -> anyhow::Resu
     Ok(())
 }
 
-/// link(app) 没有 `path` 是一处没有目标的跳转：不建边，但要留一条诊断。
+/// link(app) 没有 `path`、内嵌页没有 `resPath` 都是没有目标的引用：不建边，但要留一条诊断。
 #[test]
-fn link_action_without_path_is_reported_as_a_missing_index() -> anyhow::Result<()> {
+fn reference_without_an_index_is_reported_as_a_missing_index() -> anyhow::Result<()> {
     let project_dir = unique_temp_dir("link-missing-index");
     let page_dir = project_dir.join("app/售后.app/工单");
     std::fs::create_dir_all(&page_dir)?;
     let page = serde_json::json!({
         "canvas": {"id": "canvas", "type": "canvas", "components": [
+            {"id": "embed_empty", "type": "embedsuperpage"},
             {"id": "btn", "type": "button", "actions": [
                 {"id": "half_done", "actionType": "link", "triggerType": "click",
                  "targetType": "app", "mode": "reInit"},
@@ -659,18 +660,23 @@ fn link_action_without_path_is_reported_as_a_missing_index() -> anyhow::Result<(
         .collect();
     records.sort();
     let page_key = "app/售后.app/工单/首页.spg";
-    let message = "link action has no target index (path is missing)".to_string();
+    let message = "reference has no target index (path/resPath is missing)".to_string();
     assert_eq!(
         records,
         vec![
             (
                 format!("action:{page_key}|btn|half_done"),
-                "path".to_string(),
+                "resPath/path".to_string(),
                 message.clone()
             ),
             (
                 format!("action:{page_key}|btn|null_path"),
-                "path".to_string(),
+                "resPath/path".to_string(),
+                message.clone()
+            ),
+            (
+                format!("comp:{page_key}|embed_empty"),
+                "resPath/path".to_string(),
                 message
             ),
         ]
