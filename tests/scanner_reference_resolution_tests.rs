@@ -111,6 +111,21 @@ fn resolver_reports_why_a_reference_cannot_resolve() {
             "{drive}"
         );
     }
+    // `..` 不得跳出前缀锚点：`$TAPP:` 限当前应用，`$APP:` 限 app/ 目录
+    for escaping in ["$TAPP:/../销售.app/x.spg", "$APP:/../x.spg"] {
+        assert_eq!(
+            resolve_reference_target(CURRENT_PAGE, escaping),
+            Err(ReferenceUnresolved::EscapesRoot {
+                reference: escaping.to_string()
+            }),
+            "{escaping}"
+        );
+    }
+    // 前缀内部的 `..` 只要没跳出锚点就照常归一
+    assert_eq!(
+        resolve_reference_target(CURRENT_PAGE, "$TAPP:/文件夹/../页.spg"),
+        Ok("app/售后.app/页.spg".to_string())
+    );
     // URI 不是项目内路径，不能被拼成 `app/.../https:/host/...` 之类的假路径
     assert_eq!(
         resolve_reference_target(CURRENT_PAGE, "https://host/page.spg"),
@@ -438,9 +453,14 @@ fn malformed_reference_indices_are_reported() -> anyhow::Result<()> {
         "referenceResources": ["$TAPP:/预约/编辑.spg"],
         "canvas": {"id": "canvas", "type": "canvas", "components": [
             {"id": "embed_bad", "type": "embedsuperpage", "resPath": "abc"},
+            {"id": "embed_bool", "type": "embedsuperpage", "resPath": true},
             {"id": "btn", "type": "button", "actions": [
                 {"id": "go_bad", "actionType": "link", "triggerType": "click",
-                 "targetType": "app", "path": "-1"}
+                 "targetType": "app", "path": "-1"},
+                {"id": "go_float", "actionType": "link", "triggerType": "click",
+                 "targetType": "app", "path": 1.5},
+                {"id": "go_huge", "actionType": "link", "triggerType": "click",
+                 "targetType": "app", "path": u64::MAX}
             ]}
         ]}
     });
@@ -462,7 +482,10 @@ fn malformed_reference_indices_are_reported() -> anyhow::Result<()> {
         nodes,
         vec![
             format!("action:{page_key}|btn|go_bad"),
-            format!("comp:{page_key}|embed_bad")
+            format!("action:{page_key}|btn|go_float"),
+            format!("action:{page_key}|btn|go_huge"),
+            format!("comp:{page_key}|embed_bad"),
+            format!("comp:{page_key}|embed_bool")
         ],
         "{report:?}"
     );
