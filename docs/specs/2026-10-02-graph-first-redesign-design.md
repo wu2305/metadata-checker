@@ -5,7 +5,7 @@
 > 上游：[图 Schema 契约与图内事实设计](2026-10-02-graph-schema-contract-design.md)（PR #4，本文是它的上位框架；其 S1–S5 在 §6 被重新编号归位）、
 > [Grafeo 后端迁移设计](2026-09-05-grafeo-backend-migration-design.md)、[`--gql` 现状](../knowledge/topic-grafeo-gql.md)
 > 方向来源：2026-10-02 用户——「LLM 可以直接查 Grafeo，这个工具的功能可以大幅改变、重新判断」
-> 范围：`.fapp`、`.meta` 两类文件不在本文考虑内（用户，2026-10-03）
+> 范围：`.fapp`、`.meta`、`.wfl` 三类文件不在本文考虑内，也不解析（用户，2026-10-03）
 > 不做什么：不修改 PR #5（S1 实现，on hold）；不删除任何现有命令；不引入新依赖
 
 ## 0. 结论（一页版）
@@ -163,7 +163,7 @@ LLM 不能打开源文件复核，所以「缺失」比「错误」更危险。�
 - **层 1 确定性解析（Rust，候选 oxc）**：`origin=parser`，带文件、行区间、脚本 hash。字面量参数（URL、表名、参数键、组件 id、字段名）可确定地成边；
 - **层 2 LLM 补残余**：只做语法判不了的，走 §6 的校验提交命令（**不走 GQL 写入**），要求 `origin=llm`、置信度、行区间 + 引用片段并由校验器核对；层 1 能推出的不接受 LLM 提交；
 - **前置**：~~额外仓库同步到 GitHub~~（已完成，`wu2305/autocrm`）；oxc 体积实测（AGENTS.md 要求）；一次只计数的 spike——所有调用参数里字符串字面量对计算值的比例，这个数字决定层 2 要多大；**脚本字面量的凭据脱敏规则**（约 30 个脚本含疑似凭据的字面量，其中见到过硬编码的云访问密钥；脚本内容入图前必须先定规则，取值不得进图、不得写进任何文档，§7 Q8）；
-- **在此之前确定的事（2026-10-03 按真实语料更正）**：先前写的「workflow 节点按路径指向 `action.ts`」**不成立**：`.wfl` 文件（3 个）不含任何脚本链接。语料里实际存在的链接形态是：`.tbl` 数据流的 `Script` 节点按**裸 hash id**（无路径、无后缀）指向脚本；`.spg` 的 `webAPI.url` 按路径指向 `.action.ts`（221 个 `webAPI` 动作）；脚本之间用 `import` 路径；`.spg` 的 `script` 动作按（页面键、函数名）指向 `custom.ts` 的 `CustomActions` 函数。这些都是确定性可解析的，所以**脚本节点与「节点→脚本」边**仍可先于任何解析落地。`X.action` 是 `X.action.ts` 的编译副本，应视为同一节点的构建产物，不单独建节点。
+- **在此之前确定的事（2026-10-03 按真实语料更正）**：先前写的「workflow 节点按路径指向 `action.ts`」**不成立**：`.wfl` 文件（3 个）不含任何脚本链接，且用户说明 `.wfl` 无需解析。语料里实际存在的链接形态是：`.tbl` 数据流的 `Script` 节点按**裸 hash id**（无路径、无后缀）指向脚本；`.spg` 的 `webAPI.url` 按路径指向 `.action.ts`（221 个 `webAPI` 动作）；脚本之间用 `import` 路径；`.spg` 的 `script` 动作按（页面键、函数名）指向 `custom.ts` 的 `CustomActions` 函数。这些都是确定性可解析的，所以**脚本节点与「节点→脚本」边**仍可先于任何解析落地。`X.action` 是 `X.action.ts` 的编译副本，应视为同一节点的构建产物，不单独建节点。
 
 PR #5 保持 on hold，本文不推进它。
 
@@ -203,7 +203,7 @@ stdio / MCP 的工具表同构：`graph_schema`、`gql`、`status`、`diff_refre
 | 阶段 | 内容 | 对等/验收门禁 |
 |---|---|---|
 | **0 批准** | 批准本文 + PR #4；回答 §7 的问题 | 用户批准（draft → approved） |
-| **1.0 语料阻塞缺陷**（先于 1 的其余条目；独立于 schema 决策） | ⓐ 空 `dbTableName`（语料中 38 / 828 张表）使 `--build-graph` 整体中止（`node id has an empty kind/page/local segment: model`）：改为**逐文件诊断**，只跳过输出边，不中止；ⓑ 路径前缀解析：`$TAPP:`（当前应用根）、`$APP:`、`$ANA:`、绝对路径 `/xiaoshouyi/...`、`..` 归一，**绝不为非 `.spg` 目标创建 Page 节点**——现状 636 个 Page 节点中有 42 个磁盘上不存在（含 18 个路径里嵌着原样 `$APP:/`），其上还挂着字段；解析不了的引用记 `Diagnostic`（与阶段 1 ⑧ 同一机制）。两项都**待实现时在 `src/scanner/tbl.rs` 与路径解析处复核**，此处为兄弟线程的读码推断 | 在 autocrm 上建图成功且 `Page` 节点无幽灵（每个 Page 对应磁盘文件）；夹具上现有快照不变。「这个引用能解析吗」目前图答不了，而这是终极目标直接要的 |
+| **1.0 语料阻塞缺陷**（先于 1 的其余条目；独立于 schema 决策） | ⓐ 空 `dbTableName`（语料中 38 / 828 张表，均为 dataFlow）使 `--build-graph` 整体中止（`node id has an empty kind/page/local segment: model`）。用户确认这是**未落表数据流**（即时取数的逻辑，没有物理输出表），不是错误：模型照常入图并带 `landed: false`，不建输出边，不报诊断；ⓑ 路径前缀解析：`$TAPP:`（当前应用根）、`$APP:`、`$ANA:`、绝对路径 `/xiaoshouyi/...`、`..` 归一，**绝不为非 `.spg` 目标创建 Page 节点**——现状 636 个 Page 节点中有 42 个磁盘上不存在（含 18 个路径里嵌着原样 `$APP:/`），其上还挂着字段；解析不了的引用记 `SCANNER_UNRESOLVED_REFERENCE`（入图为 `Diagnostic` 属阶段 1 ⑧）。**已由 PR #9 实现**；剩余缺口：解析正确但目标文件不存在的页面引用（autocrm 上 7 个）仍会留下无文件的 Page 节点，判定需要文件集合；另有 17 张数据流缺省 `dbTableName` 键，语义未确认 | 在 autocrm 上建图成功且 `Page` 节点无幽灵（每个 Page 对应磁盘文件）；夹具上现有快照不变。「这个引用能解析吗」目前图答不了，而这是终极目标直接要的 |
 | **1 图补全** | ① S1 `graph_schema.rs`（**PR #5，on hold，等用户放行**）→ S2 写入校验；② S3 血缘边 + schema 版本键；③ S4 诊断入图；④ 新增 S3b：`eval_mode`、`action_kind`、循环标记；⑤ 并行：F3 嵌套表达式；⑥ 核实并补过滤字段名（PR #4 §6.1）；⑦ 血缘边在现有 `confidence`/`transform` 之外借用 OpenLineage 的 `DIRECT`/`INDIRECT` 作为 `lineage_kind` 取值（值域待实现时核对现有 `transform` 文本）；⑧ 摄入时汇总「见过但未映射」的 JSON 键（现有 `SCANNER_UNRECOGNIZED_CONTAINER_KEY` 只覆盖容器键），作为 `Diagnostic` 挂在所属文件/页面上，让图能说明自己漏了什么（调研报告 Part 2；Backstage 同样把未解析引用记为状态而非丢弃）；⑨ 前置改动（已核对源码）：扫描期诊断目前只存**计数 + 每类一个样例位置**（`scanner/spg.rs:175` 起的 `ScanDiagnostics`），要把诊断挂到具体节点，必须先改为**逐次出现一条记录**；`UNKNOWN_ACTION_TYPE` 目前在查询期算出，入图意味着导入期计算（可复算性待实现时核实）；`explain/importance.rs` 的 `classify_importance` 看起来可在导入期算出并成为节点属性，**此为推断，未核实**；⑩ 语料暴露的廉价高价值边（均来自已解析的文件，见盘点 §7）：`dimensionPath` → 字段到表的边（盘点数 26,994，与本线程原始字符串匹配 32,231 不一致，**未对账**，实现前先对账）、`properties.depends` 指向真实 model 节点、`webAPI.url`（含 `?method=`）与 `scriptFunction` 作为 Action 节点属性、`shortUrls` 作为页面别名 | 夹具上，`--explain` 每个 fact block 都能由 GQL 得出相同事实（差分测试，不降低断言）；增量与全量产物仍逐属性相等（B5 套件） |
 | **2 配方与评测** | 配方数据文件；`--graph-schema` 输出配方；评测加 GQL 臂；S5 复跑 | **同模型同题**三臂（旧动词 / GQL+help / GQL+schema+配方+规则）；独立评分；多次运行；含真实语料一轮。阈值由用户定（§7 Q7） |
 | **3 表面切换** | stdio 工具表重塑；SKILL.md 重写；旧动词发 deprecated 诊断；（可选）MCP 薄适配 | 用户批准工具表面变化（M58 曾固定它） |
