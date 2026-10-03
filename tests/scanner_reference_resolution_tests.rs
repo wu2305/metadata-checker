@@ -279,7 +279,11 @@ fn unlanded_dataflow_builds_with_landed_false_and_no_output_edge() -> anyhow::Re
         None,
         "只有显式空串才标 landed:false"
     );
-    assert!(graph.get_node("model:").is_none(), "不得出现空名物理表节点");
+    assert_eq!(
+        graph.get_node("model:").map(|node| node.id),
+        None,
+        "不得出现空名物理表节点"
+    );
     let outputs: Vec<(String, String)> = graph
         .graph
         .raw_edges()
@@ -327,11 +331,9 @@ fn references_without_a_resource_list_are_reported_as_out_of_range() -> anyhow::
         records[0].location.node_id.as_deref(),
         Some("comp:app/售后.app/工单/首页.spg|embed_orphan")
     );
-    assert!(
-        records[0]
-            .detail
-            .as_deref()
-            .is_some_and(|detail| detail.contains("out of range")),
+    assert_eq!(
+        records[0].detail.as_deref(),
+        Some("referenceResources index 0 is out of range (len 0)"),
         "{records:?}"
     );
 
@@ -364,8 +366,10 @@ fn landed_flag_survives_dataflow_metadata_enrichment() -> anyhow::Result<()> {
         .and_then(|node| node.meta)
         .expect("模型节点应有 meta");
     assert_eq!(meta["landed"], serde_json::json!(false), "{meta}");
-    assert!(
-        meta.get("nodeFields").is_some(),
+    assert_eq!(
+        meta.as_object()
+            .map(|fields| fields.contains_key("nodeFields")),
+        Some(true),
         "增强后的 meta 仍在（确认走到了增强分支）: {meta}"
     );
 
@@ -403,8 +407,9 @@ fn old_format_fingerprint_forces_a_rescan_after_a_semantics_change() -> anyhow::
 
     let states = GraphDB::open(&db_path)?.load_file_states()?;
     let current = states.get("a.spg").expect("a.spg 的文件状态").clone();
-    assert!(
-        current.file_hash.starts_with("s2-"),
+    assert_eq!(
+        &current.file_hash[..3],
+        "s2-",
         "指纹应带扫描语义版本: {}",
         current.file_hash
     );
@@ -535,8 +540,35 @@ fn empty_db_table_name_on_a_non_dataflow_is_still_rejected() {
     let mut graph = MemoryGraphStore::new();
     let error = process_tbl_file_from_string(&mut graph, "订单.tbl", &content)
         .expect_err("非数据流的空 dbTableName 不应放行");
-    assert!(
-        error.to_string().contains("not a DataFlow"),
-        "错误要点名原因: {error}"
+    assert_eq!(
+        error.to_string(),
+        "table 订单 has an empty properties.dbTableName but is not a DataFlow",
+        "错误要点名原因"
     );
+}
+
+/// 单文件输出：显式空串的数据流是有意未落表，不报 `DATAFLOW_NO_OUTPUT`；
+/// 根本没写 `dbTableName` 的数据流仍然报。
+#[test]
+fn single_file_output_warns_only_when_the_db_table_name_is_missing() -> anyhow::Result<()> {
+    let no_output_warnings = |properties: serde_json::Value| -> anyhow::Result<usize> {
+        let raw = serde_json::json!({
+            "properties": properties,
+            "dimensions": [{"name": "金额"}],
+            "dataFlow": {"nodes": {}}
+        });
+        let meta = metadata_checker::tbl_single::parse_tbl(std::path::Path::new("流.tbl"), raw)?;
+        let output = metadata_checker::output::tbl::build_tbl_output(&meta, "full");
+        Ok(output
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "DATAFLOW_NO_OUTPUT")
+            .count())
+    };
+    assert_eq!(
+        no_output_warnings(serde_json::json!({"dbTableName": ""}))?,
+        0
+    );
+    assert_eq!(no_output_warnings(serde_json::json!({}))?, 1);
+    Ok(())
 }

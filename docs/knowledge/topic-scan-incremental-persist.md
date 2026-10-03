@@ -132,6 +132,9 @@ IndexCommit { file_states, dirty_nodes, deleted_nodes, checkpoint, delta, scanne
   `$APP:` = `app/`，`$ANA:` / `$DATA:` = 项目根同级目录，无前缀 = 相对当前文件并归一 `..`；绝对路径、未知前缀、越出根、目标非 `.spg`、下标越界一律 `ReferenceUnresolved`。
   建边与诊断共用 `page_reference_sites`，诊断由 `scan_page_reference_failures` 在 per-file entry 里采集。仍可能留下指向磁盘上不存在文件的 Page 节点（解析正确但目标缺失），
   需要文件集合才能判定，尚未处理。
+  **升级遗留**：文件指纹带 `SCANNER_SEMANTICS_VERSION`（`s2-` 前缀，`src/scanner/indexer.rs`），升级后每个文件首次扫描判脏并按新规则重建；
+  但被引用而生成的目标 Page 桩节点不在该文件的 `node_ids` 里（既有行为），增量删除只清 `FileState.node_ids`，所以**旧解析器留下的畸形 Page 桩不会被清掉**。
+  要得到干净的图，升级后用新的 `--graph-db-path` 重建。通用的「无文件、无入边的 Page 桩」回收尚未实现。
 - **未落表数据流**：`dbTableName` 为空串是合法形态（即时取数、无物理输出表），模型节点 meta 带 `landed: false`，不建 `OutputsTo` 边，不产生诊断；缺省该键的表不做此断言。覆盖测试：`tests/scanner_reference_resolution_tests.rs`。
 - 删除文件与「对账出的陈旧路径」经 `scanner_deleted_paths` 同事务移除（`src/scanner/indexer.rs:221`、`src/scanner/indexer.rs:250`）。
 - **陈旧对账是当前已实现的修复机制，不是未修复缺陷**。
