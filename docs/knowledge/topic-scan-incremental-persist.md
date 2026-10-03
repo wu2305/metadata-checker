@@ -118,7 +118,7 @@ IndexCommit { file_states, dirty_nodes, deleted_nodes, checkpoint, delta, scanne
 | `SCANNER_DIAGNOSTICS_REFRESH_FAILED` | diff-refresh 侧刷新失败 |
 
 - per-file 计数序列化为 bytes，随 `IndexCommit.scanner_entries` **与图同事务落库**（`src/scanner/indexer.rs:134`）。
-- **逐次记录（`ScanOccurrence`，本条以 `ca78740` 为准，行号未逐条核验）**：除计数和每类首个样例外，per-file entry
+- **逐次记录（`ScanOccurrence`，本条以 `e9030a2` 为准（实现该行为的提交），行号未逐条核验）**：除计数和每类首个样例外，per-file entry
   还带 `occurrences`——每处出现一条 `{code, location{source_file,node_id,json_path}, detail}`。
   由 `ScanDiagnostics::record_unrecognized` / `record_duplicate` 与计数同步维护，解析失败走 `ScanDiagnostics::parse_failure`。
   读取走 `ProjectIndexer::merge_scanner_occurrence_entries`（路径字典序、文件内出现顺序）。
