@@ -97,6 +97,8 @@ pub fn add_edge_with_meta(
 pub enum ReferenceUnresolved {
     /// `referenceResources` 里没有这个下标
     IndexOutOfRange { index: usize, len: usize },
+    /// link 动作没有填写目标下标（`path` 缺失或为 null）：配置不完整，没有可连的页面
+    MissingIndex,
     /// `resPath` / `path` 不是合法的非负整数下标（如 `"abc"`、`-1`）
     MalformedIndex { value: String },
     /// 前缀（`$APP:` 等）需要项目的 app 目录结构才能展开，但本文件不在 `app/<name>.app/` 之下
@@ -120,6 +122,7 @@ impl std::fmt::Display for ReferenceUnresolved {
                 f,
                 "referenceResources index {index} is out of range (len {len})"
             ),
+            Self::MissingIndex => write!(f, "link action has no target index (path is missing)"),
             Self::MalformedIndex { value } => write!(
                 f,
                 "reference index is not a non-negative integer: {value:?}"
@@ -157,6 +160,24 @@ fn locate_app_dir(segments: &[&str]) -> Option<usize> {
         .find(|&index| segments[index - 1] == "app" && segments[index].ends_with(".app"))
 }
 
+/// 推断项目根（根下并列 `app/`、`ana/`、`data/`）在 `rel_path` 里的位置，返回根之前的段。
+///
+/// 在某个 `app/<name>.app` 之下时，根就是 `app` 之前的段；否则找第一个 `ana` / `data` 目录段
+/// （它们是根的同级目录，不是文件）。都找不到就无从推断，调用方按 `NoAppRoot` 处理，
+/// 不去猜一个根——猜错会造出磁盘上不存在的页面路径。
+fn locate_project_root<'a>(
+    segments: &'a [&'a str],
+    app_dir: Option<usize>,
+) -> Option<&'a [&'a str]> {
+    if let Some(index) = app_dir {
+        return Some(&segments[..index - 1]);
+    }
+    let directory_count = segments.len().saturating_sub(1);
+    (0..directory_count)
+        .find(|&index| matches!(segments[index], "ana" | "data"))
+        .map(|index| &segments[..index])
+}
+
 /// 把一条引用字符串展开为项目根锚定的页面路径。
 ///
 /// 前缀语义（对照真实语料确认）：
@@ -176,15 +197,18 @@ pub fn resolve_reference_target(
     let segments: Vec<&str> = current.split('/').filter(|part| !part.is_empty()).collect();
     let joined = if let Some((prefix, rest)) = split_dollar_prefix(reference) {
         let app_dir = locate_app_dir(&segments);
-        let base = match (prefix, app_dir) {
-            ("$TAPP:", Some(index)) => segments[..=index].join("/"),
-            ("$APP:", Some(index)) => segments[..index].join("/"),
-            ("$ANA:", Some(index)) => join_root_sibling(&segments[..index - 1], "ana"),
-            ("$DATA:", Some(index)) => join_root_sibling(&segments[..index - 1], "data"),
-            ("$TAPP:", None) => return Err(ReferenceUnresolved::NoAppRoot { prefix: "$TAPP:" }),
-            ("$APP:", None) => return Err(ReferenceUnresolved::NoAppRoot { prefix: "$APP:" }),
-            ("$ANA:", None) => return Err(ReferenceUnresolved::NoAppRoot { prefix: "$ANA:" }),
-            ("$DATA:", None) => return Err(ReferenceUnresolved::NoAppRoot { prefix: "$DATA:" }),
+        // `$APP:` / `$ANA:` / `$DATA:` 以项目根为锚，不要求当前文件在某个应用之下；
+        // `$TAPP:` 才必须有当前应用。
+        let root_segments = locate_project_root(&segments, app_dir);
+        let base = match (prefix, app_dir, root_segments) {
+            ("$TAPP:", Some(index), _) => segments[..=index].join("/"),
+            ("$APP:", _, Some(root)) => join_root_sibling(root, "app"),
+            ("$ANA:", _, Some(root)) => join_root_sibling(root, "ana"),
+            ("$DATA:", _, Some(root)) => join_root_sibling(root, "data"),
+            ("$TAPP:", None, _) => return Err(ReferenceUnresolved::NoAppRoot { prefix: "$TAPP:" }),
+            ("$APP:", _, None) => return Err(ReferenceUnresolved::NoAppRoot { prefix: "$APP:" }),
+            ("$ANA:", _, None) => return Err(ReferenceUnresolved::NoAppRoot { prefix: "$ANA:" }),
+            ("$DATA:", _, None) => return Err(ReferenceUnresolved::NoAppRoot { prefix: "$DATA:" }),
             _ => {
                 return Err(ReferenceUnresolved::UnknownPrefix {
                     reference: reference.to_string(),

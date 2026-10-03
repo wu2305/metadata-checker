@@ -31,6 +31,42 @@ fn unique_temp_dir(tag: &str) -> PathBuf {
 
 const CURRENT_PAGE: &str = "app/售后.app/工单/首页.spg";
 
+/// `$APP:` / `$ANA:` / `$DATA:` 以项目根为锚，当前文件不在 app 目录下也能展开；`$TAPP:` 仍需要当前应用。
+#[test]
+fn root_scoped_prefixes_resolve_outside_app_directories() {
+    let cases = [
+        (
+            "ana/看板.spg",
+            "$APP:/销售.app/详情.spg",
+            "app/销售.app/详情.spg",
+        ),
+        ("ana/看板.spg", "$ANA:/其他.spg", "ana/其他.spg"),
+        ("data/页.spg", "$DATA:/子/页.spg", "data/子/页.spg"),
+        // 扫描根在项目根之上时，根从 ana/data 目录段推断
+        (
+            "xiaoshouyi/ana/看板.spg",
+            "$APP:/销售.app/详情.spg",
+            "xiaoshouyi/app/销售.app/详情.spg",
+        ),
+    ];
+    for (current, reference, expected) in cases {
+        assert_eq!(
+            resolve_reference_target(current, reference),
+            Ok(expected.to_string()),
+            "{current} -> {reference}"
+        );
+    }
+    // 没有 app/ana/data 任何线索就推断不出根，也不去猜
+    assert_eq!(
+        resolve_reference_target("单文件.spg", "$APP:/销售.app/详情.spg"),
+        Err(ReferenceUnresolved::NoAppRoot { prefix: "$APP:" })
+    );
+    assert_eq!(
+        resolve_reference_target("ana/看板.spg", "$TAPP:/x.spg"),
+        Err(ReferenceUnresolved::NoAppRoot { prefix: "$TAPP:" })
+    );
+}
+
 /// 各前缀与相对路径的展开结果（对照真实语料确认过的语义）。
 #[test]
 fn resolver_expands_each_prefix_against_the_current_app() {
@@ -584,6 +620,78 @@ fn link_action_without_path_keeps_action_reads_from_parameters() -> anyhow::Resu
 
     let _ = std::fs::remove_dir_all(&project_dir);
     Ok(())
+}
+
+/// link(app) 没有 `path` 是一处没有目标的跳转：不建边，但要留一条诊断。
+#[test]
+fn link_action_without_path_is_reported_as_a_missing_index() -> anyhow::Result<()> {
+    let project_dir = unique_temp_dir("link-missing-index");
+    let page_dir = project_dir.join("app/售后.app/工单");
+    std::fs::create_dir_all(&page_dir)?;
+    let page = serde_json::json!({
+        "canvas": {"id": "canvas", "type": "canvas", "components": [
+            {"id": "btn", "type": "button", "actions": [
+                {"id": "half_done", "actionType": "link", "triggerType": "click",
+                 "targetType": "app", "mode": "reInit"},
+                {"id": "null_path", "actionType": "link", "triggerType": "click",
+                 "targetType": "app", "path": null}
+            ]}
+        ]}
+    });
+    std::fs::write(page_dir.join("首页.spg"), serde_json::to_string(&page)?)?;
+    let db_path = project_dir.join("graph.db");
+    ProjectIndexer::scan_with_diagnostics(&project_dir, &db_path)?;
+
+    let graph = GraphDB::open(&db_path)?;
+    let entries = graph.load_scanner_diagnostic_entries()?;
+    let report = ProjectIndexer::merge_scanner_occurrence_entries(&entries)?;
+    let mut records: Vec<(String, String, String)> = report
+        .occurrences
+        .iter()
+        .filter(|record| record.code == CODE_UNRESOLVED)
+        .map(|record| {
+            (
+                record.location.node_id.clone().unwrap_or_default(),
+                record.location.json_path.clone().unwrap_or_default(),
+                record.detail.clone().unwrap_or_default(),
+            )
+        })
+        .collect();
+    records.sort();
+    let page_key = "app/售后.app/工单/首页.spg";
+    let message = "link action has no target index (path is missing)".to_string();
+    assert_eq!(
+        records,
+        vec![
+            (
+                format!("action:{page_key}|btn|half_done"),
+                "path".to_string(),
+                message.clone()
+            ),
+            (
+                format!("action:{page_key}|btn|null_path"),
+                "path".to_string(),
+                message
+            ),
+        ]
+    );
+    let _ = std::fs::remove_dir_all(&project_dir);
+    Ok(())
+}
+
+/// 单文件解析与项目扫描同口径：非数据流的空 `dbTableName` 直接报错。
+#[test]
+fn single_file_parser_rejects_empty_db_table_name_on_a_non_dataflow() {
+    use metadata_checker::source_id::{ProjectRef, SourceId};
+    let raw = serde_json::json!({"properties": {"dbTableName": ""}, "dimensions": []});
+    let source = SourceId::from_local_path(
+        ProjectRef::new("default"),
+        std::path::Path::new("plain.tbl"),
+        None,
+    )
+    .expect("source id");
+    let result = metadata_checker::tbl_single::parse_tbl_from_value_with_source(&source, raw);
+    assert_eq!(result.is_err(), true);
 }
 
 /// 空 `dbTableName` 只对数据流合法；其它表类型的空名仍然报错，不静默当作无输出。

@@ -112,6 +112,10 @@ pub fn parse_tbl_from_value_with_source(source: &SourceId, raw: Value) -> Result
         .and_then(|p| p.get("dbTableName"))
         .and_then(|v| v.as_str());
     meta.unlanded = meta.is_dataflow && raw_db_table_name == Some("");
+    // 与项目扫描（`validate_table_identities`）同口径：非数据流的空输出表名是格式问题
+    if !meta.is_dataflow && raw_db_table_name == Some("") {
+        anyhow::bail!("table has an empty properties.dbTableName but is not a DataFlow");
+    }
     meta.db_table_name = raw_db_table_name
         .filter(|_| !meta.unlanded)
         .map(String::from);

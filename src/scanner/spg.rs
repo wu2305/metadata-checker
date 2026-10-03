@@ -178,27 +178,26 @@ pub fn scan_raw_occurrences(value: &serde_json::Value, logical_path: &str) -> Ve
 /// 页面里「引用另一个页面」的位置：`embedsuperpage` 的 `resPath` 与 `link`（app）动作的
 /// `path`，都应是 `referenceResources` 的下标。建边与诊断共用本函数，保证「哪些引用会建边」
 /// 与「哪些引用记诊断」同一口径。返回 `(所属节点 id, 原始下标文本)`，id 为页面局部组件/动作 id；
-/// 下标文本不一定能解析为数字——解析不了的同样是一处无法解析的引用，由诊断侧记录。
+/// 下标文本不一定能解析为数字，link 动作还可能没有下标（`None`）——这些同样是一处无法解析的引用，由诊断侧记录。
 fn page_reference_sites(
     rel_path: &str,
     meta: &crate::superpage::SuperPageMetadata,
-) -> Vec<(String, String)> {
+) -> Vec<(String, Option<String>)> {
     let page = rel_path.replace('\\', "/");
     let mut sites = Vec::new();
     for comp in &meta.components {
         if comp.component_type == "embedsuperpage"
             && let Some(raw_index) = &comp.res_path
         {
-            sites.push((format!("comp:{page}|{}", comp.id), raw_index.clone()));
+            sites.push((format!("comp:{page}|{}", comp.id), Some(raw_index.clone())));
         }
         for action in &comp.actions {
-            if action.action_type == "link"
-                && action.target_type == "app"
-                && let Some(raw_index) = &action.path
-            {
+            // link(app) 没有下标（`path` 缺失或为 null）同样是一处没有目标的跳转：
+            // 语料里有未配置完成的 link 动作，图要能说明这里缺了目标。
+            if action.action_type == "link" && action.target_type == "app" {
                 sites.push((
                     format!("action:{page}|{}|{}", comp.id, action.id),
-                    raw_index.clone(),
+                    action.path.clone(),
                 ));
             }
         }
@@ -220,16 +219,21 @@ pub(crate) fn scan_page_reference_failures(
     let meta = crate::superpage::parse_superpage_from_value(value.clone())
         .with_context(|| format!("Failed to parse {logical_path} for reference diagnostics"))?;
     for (node_id, raw_index) in page_reference_sites(logical_path, &meta) {
-        let (json_path, outcome) = match raw_index.parse::<usize>() {
-            Ok(index) => (
-                format!("referenceResources[{index}]"),
-                resolve_reference_path(logical_path, index, &meta.reference_resources),
-            ),
-            Err(_) => (
-                // 下标本身不是数字：位置只能指向持有它的节点
-                "resPath/path".to_string(),
-                Err(ReferenceUnresolved::MalformedIndex { value: raw_index }),
-            ),
+        let (json_path, outcome) = match &raw_index {
+            None => ("path".to_string(), Err(ReferenceUnresolved::MissingIndex)),
+            Some(text) => match text.parse::<usize>() {
+                Ok(index) => (
+                    format!("referenceResources[{index}]"),
+                    resolve_reference_path(logical_path, index, &meta.reference_resources),
+                ),
+                Err(_) => (
+                    // 下标本身不是数字：位置只能指向持有它的节点
+                    "resPath/path".to_string(),
+                    Err(ReferenceUnresolved::MalformedIndex {
+                        value: text.clone(),
+                    }),
+                ),
+            },
         };
         if let Err(reason) = outcome {
             diags.record_unresolved_reference(
