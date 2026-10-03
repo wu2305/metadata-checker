@@ -501,6 +501,25 @@ fn documented_boundary_cases_match_the_scanner() {
         ]}
     });
     std::fs::write(project.join("a.spg"), page.to_string()).expect("write a.spg");
+    // 指向绝对路径的 link 解析不了：没有边、没有 Page 节点，缺口记在 scanner_entry 里
+    let linking_page = serde_json::json!({
+        "referenceResources": ["/sysdata/公共/页.spg"],
+        "canvas": {"id": "canvas", "type": "canvas", "components": [
+            {"id": "btn", "type": "button", "actions": [
+                {"id": "go", "actionType": "link", "triggerType": "click",
+                 "targetType": "app", "path": 0}
+            ]}
+        ]}
+    });
+    std::fs::write(project.join("linking.spg"), linking_page.to_string())
+        .expect("write linking.spg");
+    // dbTableName 为空的 dataflow 是未落表的：Model 上 landed 为 false，且没有 OutputsTo
+    let unlanded_flow = serde_json::json!({
+        "properties": {"dbTableName": ""},
+        "dataFlow": {"nodes": {}},
+        "dimensions": []
+    });
+    std::fs::write(project.join("flow.tbl"), unlanded_flow.to_string()).expect("write flow.tbl");
     std::fs::write(
         project.join("nocanvas.spg"),
         serde_json::json!({"version": "1", "params": [], "sources": []}).to_string(),
@@ -555,6 +574,56 @@ fn documented_boundary_cases_match_the_scanner() {
         "MATCH (s:IndexState) WHERE s.key = 'file_state:nocanvas.spg' RETURN s.key",
     );
     assert_eq!(file_state.len(), 1, "已扫描的页面有 file_state 记录");
+    // 解析不了的 link：没有 Page 节点，scanner_entry 里有一条 unresolved_reference
+    let ghost_pages = gql_rows(
+        &db,
+        "MATCH (p:Node) WHERE p.node_type = 'Page' AND p.path CONTAINS 'sysdata' RETURN p.id",
+    );
+    assert_eq!(ghost_pages, Vec::<Vec<Value>>::new());
+    let entry = gql_rows(
+        &db,
+        "MATCH (s:IndexState) WHERE s.key = 'scanner_entry:linking.spg' RETURN s.value",
+    );
+    let entry_json: Value = serde_json::from_str(
+        entry[0][0]
+            .as_str()
+            .expect("scanner_entry 的 value 是 JSON 文本"),
+    )
+    .expect("scanner_entry 的 value 可解析");
+    assert_eq!(entry_json["unresolved_reference"], Value::from(1));
+    // 契约里写明的 occurrences 形态：code / location{source_file,node_id,json_path} / detail
+    let occurrence = &entry_json["occurrences"][0];
+    assert_eq!(
+        occurrence["code"],
+        Value::String("SCANNER_UNRESOLVED_REFERENCE".into())
+    );
+    assert_eq!(occurrence["location"]["source_file"].is_string(), true);
+    assert_eq!(occurrence["location"]["json_path"].is_string(), true);
+    assert_eq!(occurrence["detail"].is_string(), true);
+    // 契约里列出的索引记录 key 形态都真实存在（file_state 在上面已查过）
+    for record in graph_schema::schema().labels.internal_records {
+        let prefix = record.key_form.split('<').next().expect("key 前缀");
+        let rows = gql_rows(
+            &db,
+            &format!("MATCH (s:IndexState) WHERE s.key STARTS WITH '{prefix}' RETURN s.key"),
+        );
+        assert_eq!(rows.is_empty(), false, "没有 {prefix} 记录");
+    }
+    // 未落表 dataflow：landed = false（Bool），没有 OutputsTo
+    let unlanded = gql_rows(
+        &db,
+        "MATCH (m:Node) WHERE m.node_type = 'Model' AND m.meta CONTAINS 'landed' RETURN m.id, m.meta",
+    );
+    assert_eq!(
+        unlanded.len(),
+        1,
+        "只有未落表的 dataflow 带 landed：{unlanded:?}"
+    );
+    let landed_meta: Value =
+        serde_json::from_str(unlanded[0][1].as_str().expect("meta 是 JSON 文本")).expect("meta");
+    assert_eq!(landed_meta["landed"], Value::Bool(false));
+    // 整张边界图（含 landed）也要符合契约表：表里删掉 landed 时这里必须失败
+    assert_eq!(conformance_violations(&db), Vec::<String>::new());
     std::fs::remove_dir_all(&project).expect("remove project dir");
 }
 
@@ -644,6 +713,14 @@ fn gql_help_is_generated_from_the_schema() {
     }
     for property in schema.labels.edge_properties {
         assert_eq!(help.contains(property), true, "help 缺边属性：{property}");
+    }
+    for record in schema.labels.internal_records {
+        assert_eq!(
+            help.contains(record.key_form),
+            true,
+            "help 缺索引记录：{}",
+            record.key_form
+        );
     }
 }
 
