@@ -1689,11 +1689,16 @@ pub fn process_spg_file_from_value_with_identity(
                     // path 是 referenceResources 的下标；解析不了时没有目标页面可连，
                     // 但参数表达式里的模型读取与目标无关，仍要入图（诊断由
                     // `scan_page_reference_failures` 记录）。
-                    if let Some(ref path_str) = action.path {
-                        let resolved_target = path_str.parse::<usize>().ok().and_then(|ref_idx| {
-                            resolve_reference_path(rel_path, ref_idx, &meta.reference_resources)
-                                .ok()
-                        });
+                    // path 缺失（或为 null）与解析失败同样处理：没有目标，但读取照常提取。
+                    {
+                        let resolved_target = action
+                            .path
+                            .as_deref()
+                            .and_then(|path_str| path_str.parse::<usize>().ok())
+                            .and_then(|ref_idx| {
+                                resolve_reference_path(rel_path, ref_idx, &meta.reference_resources)
+                                    .ok()
+                            });
                         let target_name = resolved_target.as_ref().map(|target_rel| {
                             Path::new(target_rel)
                                 .file_stem()

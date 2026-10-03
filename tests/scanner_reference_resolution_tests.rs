@@ -36,6 +36,7 @@ const CURRENT_PAGE: &str = "app/售后.app/工单/首页.spg";
 fn resolver_expands_each_prefix_against_the_current_app() {
     let cases = [
         ("$TAPP:/预约/编辑.spg", "app/售后.app/预约/编辑.spg"),
+        ("$TAPP:\\预约\\编辑.spg", "app/售后.app/预约/编辑.spg"),
         ("$APP:/销售.app/合同/审批.spg", "app/销售.app/合同/审批.spg"),
         ("../备份/旧页.spg", "app/售后.app/备份/旧页.spg"),
         ("./同级.spg", "app/售后.app/工单/同级.spg"),
@@ -544,6 +545,42 @@ fn unresolved_link_target_keeps_action_reads_from_parameters() -> anyhow::Result
         .filter(|edge| edge.weight.edge_type == EdgeType::ActionNavigates)
         .count();
     assert_eq!(navigates, 0, "目标是报表，不建导航边");
+
+    let _ = std::fs::remove_dir_all(&project_dir);
+    Ok(())
+}
+
+/// link 动作没有 `path` 时同样没有目标页面，但参数表达式里的模型读取照常入图。
+#[test]
+fn link_action_without_path_keeps_action_reads_from_parameters() -> anyhow::Result<()> {
+    let project_dir = unique_temp_dir("link-no-path");
+    let page_dir = project_dir.join("app/售后.app/工单");
+    std::fs::create_dir_all(&page_dir)?;
+    let page = serde_json::json!({
+        "sources": [{"id": "model1", "modelType": "dwtable", "path": "data/orders.tbl"}],
+        "canvas": {"id": "canvas", "type": "canvas", "components": [
+            {"id": "btn", "type": "button", "actions": [
+                {"id": "open_nothing", "actionType": "link", "triggerType": "click",
+                 "targetType": "app",
+                 "data": [{"name": "orderId", "value": "=model1.orderId"}]}
+            ]}
+        ]}
+    });
+    std::fs::write(page_dir.join("首页.spg"), serde_json::to_string(&page)?)?;
+    let db_path = project_dir.join("graph.db");
+    ProjectIndexer::scan_with_diagnostics(&project_dir, &db_path)?;
+
+    let graph = GraphDB::open(&db_path)?;
+    let action_id = "action:app/售后.app/工单/首页.spg|btn|open_nothing";
+    let read_count = graph
+        .graph
+        .raw_edges()
+        .iter()
+        .filter(|edge| {
+            edge.weight.edge_type == EdgeType::ActionReads && edge.weight.from == action_id
+        })
+        .count();
+    assert_eq!(read_count, 4, "没有 path 也要提取 model1.orderId 的读取");
 
     let _ = std::fs::remove_dir_all(&project_dir);
     Ok(())

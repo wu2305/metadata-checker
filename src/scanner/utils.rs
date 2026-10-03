@@ -193,10 +193,11 @@ pub fn resolve_reference_target(
         };
         // 先在前缀自己的命名空间里归一：`..` 不得跳出前缀锚点
         // （如 `$TAPP:/../b.app/x.spg` 不能借 `..` 离开当前应用）。
-        let anchored = crate::graph_identity::normalize_project_path(rest.trim_start_matches('/'))
-            .map_err(|_| ReferenceUnresolved::EscapesRoot {
-                reference: reference.to_string(),
-            })?;
+        let anchored =
+            crate::graph_identity::normalize_project_path(rest.trim_start_matches(['/', '\\']))
+                .map_err(|_| ReferenceUnresolved::EscapesRoot {
+                    reference: reference.to_string(),
+                })?;
         format!("{base}/{anchored}")
     } else if has_uri_scheme(reference) {
         return Err(ReferenceUnresolved::Uri {
