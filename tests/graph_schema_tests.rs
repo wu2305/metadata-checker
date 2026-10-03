@@ -596,7 +596,11 @@ fn documented_boundary_cases_match_the_scanner() {
         &db,
         "MATCH (m:Node) WHERE m.node_type = 'Model' AND m.meta CONTAINS 'landed' RETURN m.id, m.meta",
     );
-    assert_eq!(unlanded.len(), 1, "只有未落表的 dataflow 带 landed：{unlanded:?}");
+    assert_eq!(
+        unlanded.len(),
+        1,
+        "只有未落表的 dataflow 带 landed：{unlanded:?}"
+    );
     let landed_meta: Value =
         serde_json::from_str(unlanded[0][1].as_str().expect("meta 是 JSON 文本")).expect("meta");
     assert_eq!(landed_meta["landed"], Value::Bool(false));
