@@ -209,20 +209,14 @@ fn page_reference_sites(
 /// 对一个页面采集「跨页引用解析不到 `.spg` 页面」的诊断。
 ///
 /// 这些引用在建图时被跳过（不建边、不造 Page 节点），这里把每一处如实记下来，
-/// 让图能说明自己缺了什么。没有 `referenceResources` 的页面不会走完整解析。
+/// 让图能说明自己缺了什么。`referenceResources` 缺失或为空时仍要走：此时任何下标都越界，
+/// 建图同样会跳过，必须记诊断。
 #[cfg(any(test, feature = "cli-local"))]
 pub(crate) fn scan_page_reference_failures(
     value: &serde_json::Value,
     logical_path: &str,
     diags: &mut ScanDiagnostics,
 ) -> Result<()> {
-    let has_references = value
-        .get("referenceResources")
-        .and_then(|v| v.as_array())
-        .is_some_and(|items| !items.is_empty());
-    if !has_references {
-        return Ok(());
-    }
     let meta = crate::superpage::parse_superpage_from_value(value.clone())
         .with_context(|| format!("Failed to parse {logical_path} for reference diagnostics"))?;
     for (node_id, index) in page_reference_sites(logical_path, &meta) {

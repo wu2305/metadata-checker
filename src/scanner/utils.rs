@@ -181,7 +181,7 @@ pub fn resolve_reference_target(
             }
         };
         format!("{base}/{}", rest.trim_start_matches('/'))
-    } else if reference.starts_with(['/', '\\']) {
+    } else if reference.starts_with(['/', '\\']) || has_drive_prefix(reference) {
         return Err(ReferenceUnresolved::AbsolutePath {
             reference: reference.to_string(),
         });
@@ -203,6 +203,13 @@ pub fn resolve_reference_target(
         return Err(ReferenceUnresolved::NotAPage { target: normalized });
     }
     Ok(normalized)
+}
+
+/// Windows 盘符前缀（`C:\x`、`C:/x`）：拼到当前目录之后 `normalize_project_path` 就认不出它了，
+/// 所以必须在拼接前拒绝。
+fn has_drive_prefix(reference: &str) -> bool {
+    let bytes = reference.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
 /// 拆出 `$XXX:` 前缀；`$` 开头但没有冒号的不算前缀。

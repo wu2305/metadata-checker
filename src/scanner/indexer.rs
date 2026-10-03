@@ -37,6 +37,21 @@ pub struct IndexPlan {
 }
 
 /// 已解析待写图更新项
+/// 扫描语义版本：同一份源文件内容会被扫成不同的图/诊断时必须递增。
+///
+/// 增量扫描只比较文件指纹，内容没变就跳过解析；若规则变了而指纹不变，升级后的旧图
+/// 会一直保留旧规则的结果。把版本折进指纹，升级后每个文件第一次扫描都判为脏、
+/// 按新规则重建一次。
+/// - 2：跨页引用按前缀解析且不造幽灵 Page；空 `dbTableName` 不再中止（`landed: false`）。
+const SCANNER_SEMANTICS_VERSION: u32 = 2;
+
+/// 文件内容指纹：`s<扫描语义版本>-<内容 xxhash>`，见 [`SCANNER_SEMANTICS_VERSION`]。
+fn content_fingerprint(content_bytes: &[u8]) -> String {
+    let mut hasher = XxHash64::default();
+    hasher.write(content_bytes);
+    format!("s{SCANNER_SEMANTICS_VERSION}-{:x}", hasher.finish())
+}
+
 #[derive(Debug)]
 pub struct ParsedGraphUpdate {
     /// 逻辑路径（相对项目路径）
@@ -654,9 +669,7 @@ impl ProjectIndexer {
             current_paths.insert(rel.clone(), path.clone());
 
             let content_bytes = provider.read_bytes(path)?;
-            let mut hasher = XxHash64::default();
-            hasher.write(&content_bytes);
-            let file_hash = format!("{:x}", hasher.finish());
+            let file_hash = content_fingerprint(&content_bytes);
 
             discovered_count += 1;
 
@@ -722,9 +735,7 @@ impl ProjectIndexer {
             };
 
             let (file_hash, mtime, size) = {
-                let mut hasher = XxHash64::default();
-                hasher.write(&content_bytes);
-                let hash = format!("{:x}", hasher.finish());
+                let hash = content_fingerprint(&content_bytes);
 
                 let metadata = provider.metadata(path)?;
                 let mtime = metadata

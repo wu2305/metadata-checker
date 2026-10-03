@@ -101,6 +101,16 @@ fn resolver_reports_why_a_reference_cannot_resolve() {
         Err(ReferenceUnresolved::NoAppRoot { prefix: "$TAPP:" }),
         "文件不在 app/<name>.app/ 之下时，$TAPP: 无从展开"
     );
+    // Windows 盘符路径不能被当成相对路径拼到当前目录之后
+    for drive in ["C:\\outside\\page.spg", "D:/outside/page.spg"] {
+        assert_eq!(
+            resolve_reference_target(CURRENT_PAGE, drive),
+            Err(ReferenceUnresolved::AbsolutePath {
+                reference: drive.to_string()
+            }),
+            "{drive}"
+        );
+    }
     assert_eq!(
         resolve_reference_target(CURRENT_PAGE, "附件/说明.docx"),
         Err(ReferenceUnresolved::NotAPage {
@@ -271,6 +281,129 @@ fn unlanded_dataflow_builds_with_landed_false_and_no_output_edge() -> anyhow::Re
     let entries = graph.load_scanner_diagnostic_entries()?;
     let report = ProjectIndexer::merge_scanner_occurrence_entries(&entries)?;
     assert_eq!(report.occurrences.len(), 0, "{report:?}");
+
+    let _ = std::fs::remove_dir_all(&project_dir);
+    Ok(())
+}
+
+/// `referenceResources` 缺失时，页面里仍引用下标：每处都越界，建图跳过，诊断必须照记。
+#[test]
+fn references_without_a_resource_list_are_reported_as_out_of_range() -> anyhow::Result<()> {
+    let project_dir = unique_temp_dir("no-list");
+    let page_dir = project_dir.join("app/售后.app/工单");
+    std::fs::create_dir_all(&page_dir)?;
+    let page = serde_json::json!({
+        "canvas": {"id": "canvas", "type": "canvas", "components": [
+            {"id": "embed_orphan", "type": "embedsuperpage", "resPath": 0}
+        ]}
+    });
+    std::fs::write(page_dir.join("首页.spg"), serde_json::to_string(&page)?)?;
+    let db_path = project_dir.join("graph.db");
+    ProjectIndexer::scan_with_diagnostics(&project_dir, &db_path)?;
+
+    let entries = GraphDB::open(&db_path)?.load_scanner_diagnostic_entries()?;
+    let report = ProjectIndexer::merge_scanner_occurrence_entries(&entries)?;
+    let records: Vec<_> = report
+        .occurrences
+        .iter()
+        .filter(|record| record.code == CODE_UNRESOLVED)
+        .collect();
+    assert_eq!(records.len(), 1, "{report:?}");
+    assert_eq!(
+        records[0].location.node_id.as_deref(),
+        Some("comp:app/售后.app/工单/首页.spg|embed_orphan")
+    );
+    assert!(
+        records[0]
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("out of range")),
+        "{records:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(&project_dir);
+    Ok(())
+}
+
+/// 数据流有输入节点时，建图会重建并再次写入模型 meta；`landed: false` 不能在那一步丢失。
+#[test]
+fn landed_flag_survives_dataflow_metadata_enrichment() -> anyhow::Result<()> {
+    let project_dir = unique_temp_dir("tbl-nodes");
+    std::fs::create_dir_all(&project_dir)?;
+    let flow = serde_json::json!({
+        "properties": {"dbTableName": ""},
+        "dimensions": [{"name": "金额"}],
+        "dataFlow": {"nodes": {
+            "n1": {"moduleTablePath": "$DATA:/源/订单.tbl"}
+        }}
+    });
+    std::fs::write(
+        project_dir.join("即时取数.tbl"),
+        serde_json::to_string(&flow)?,
+    )?;
+    let db_path = project_dir.join("graph.db");
+    ProjectIndexer::scan_with_diagnostics(&project_dir, &db_path)?;
+
+    let graph = GraphDB::open(&db_path)?;
+    let meta = graph
+        .get_node("model:即时取数")
+        .and_then(|node| node.meta)
+        .expect("模型节点应有 meta");
+    assert_eq!(meta["landed"], serde_json::json!(false), "{meta}");
+    assert!(
+        meta.get("nodeFields").is_some(),
+        "增强后的 meta 仍在（确认走到了增强分支）: {meta}"
+    );
+
+    let _ = std::fs::remove_dir_all(&project_dir);
+    Ok(())
+}
+
+/// 单文件解析与项目扫描口径一致：空串 `dbTableName` 不产生输出，也不当作表 id。
+#[test]
+fn single_file_parser_treats_empty_db_table_name_as_unlanded() -> anyhow::Result<()> {
+    let raw = serde_json::json!({
+        "properties": {"dbTableName": ""},
+        "dimensions": [{"name": "金额"}],
+        "dataFlow": {"nodes": {}}
+    });
+    let meta = metadata_checker::tbl_single::parse_tbl(std::path::Path::new("即时取数.tbl"), raw)?;
+    assert_eq!(meta.db_table_name, None);
+    assert_eq!(meta.table_id.as_deref(), Some("即时取数"), "回退到文件名");
+    assert_eq!(meta.dataflow_outputs.len(), 0);
+    Ok(())
+}
+
+/// 升级后增量扫描必须重扫：文件指纹带扫描语义版本，旧格式指纹（纯内容哈希）判为脏，
+/// 当前格式指纹判为干净。否则规则变了、文件没变，旧图会原样保留旧规则的结果。
+#[test]
+fn old_format_fingerprint_forces_a_rescan_after_a_semantics_change() -> anyhow::Result<()> {
+    use metadata_checker::storage_provider::LocalDocumentProvider;
+
+    let project_dir = unique_temp_dir("fingerprint");
+    std::fs::create_dir_all(&project_dir)?;
+    let page = serde_json::json!({"canvas": {"components": [{"id": "ok1", "type": "button"}]}});
+    std::fs::write(project_dir.join("a.spg"), serde_json::to_string(&page)?)?;
+    let db_path = project_dir.join("graph.db");
+    ProjectIndexer::scan_with_diagnostics(&project_dir, &db_path)?;
+
+    let states = GraphDB::open(&db_path)?.load_file_states()?;
+    let current = states.get("a.spg").expect("a.spg 的文件状态").clone();
+    assert!(
+        current.file_hash.starts_with("s2-"),
+        "指纹应带扫描语义版本: {}",
+        current.file_hash
+    );
+    let files = vec![project_dir.join("a.spg")];
+    let provider = LocalDocumentProvider;
+    let plan = ProjectIndexer::diff_file_states(&files, &states, &project_dir, &provider)?;
+    assert_eq!(plan.dirty.len(), 0, "当前格式指纹 = 干净");
+
+    let mut legacy = states.clone();
+    legacy.get_mut("a.spg").expect("a.spg").file_hash =
+        current.file_hash["s2-".len()..].to_string();
+    let plan = ProjectIndexer::diff_file_states(&files, &legacy, &project_dir, &provider)?;
+    assert_eq!(plan.dirty.len(), 1, "旧格式指纹 = 脏，需要按新规则重扫");
 
     let _ = std::fs::remove_dir_all(&project_dir);
     Ok(())

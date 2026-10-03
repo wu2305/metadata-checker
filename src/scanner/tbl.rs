@@ -39,12 +39,12 @@ pub fn process_tbl_file_from_string(
 
     let mut model_meta = serde_json::json!({"modelType": model_type});
     // 显式空串 = 未落表数据流；缺省键是另一回事（语义未确认），不在此断言。
-    if value
+    // 后面的 DataFlow 元数据增强会重建 meta 再 upsert，必须把这个标记带过去。
+    let unlanded = value
         .pointer("/properties/dbTableName")
         .and_then(|v| v.as_str())
-        .is_some_and(str::is_empty)
-        && let Some(obj) = model_meta.as_object_mut()
-    {
+        .is_some_and(str::is_empty);
+    if unlanded && let Some(obj) = model_meta.as_object_mut() {
         obj.insert("landed".to_string(), serde_json::json!(false));
     }
     // Store dimensions in model meta so chain lineage can resolve field mappings
@@ -345,6 +345,9 @@ pub fn process_tbl_file_from_string(
             // Store all DataFlow metadata for subGraph expansion.
             let mut enriched_meta = serde_json::json!({"modelType": model_type});
             if let Some(obj) = enriched_meta.as_object_mut() {
+                if unlanded {
+                    obj.insert("landed".to_string(), serde_json::json!(false));
+                }
                 obj.insert(
                     "internalDeps".to_string(),
                     serde_json::to_value(&internal_deps).unwrap_or(serde_json::Value::Null),
