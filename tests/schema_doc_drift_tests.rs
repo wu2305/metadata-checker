@@ -9,48 +9,47 @@ use std::collections::BTreeSet;
 use anyhow::{Context, Result, anyhow};
 use metadata_checker::output::OutputKind;
 
-/// 枚举全部变体。
+/// 单一变体清单：同时生成「全部变体列表」和「无通配分支的 exhaustive match」。
 ///
-/// `match` 故意不写通配分支：新增变体时这里会编译失败，
-/// 迫使维护者同步更新 `all_output_kinds`，再由下面的测试要求同步文档。
-fn exhaustive_check(kind: &OutputKind) {
-    match kind {
-        OutputKind::SuperPage
-        | OutputKind::PageQuery
-        | OutputKind::ModelQuery
-        | OutputKind::CrossPageQuery
-        | OutputKind::DataFlowQuery
-        | OutputKind::ComponentQuery
-        | OutputKind::PriorityQuery
-        | OutputKind::Explain
-        | OutputKind::Context
-        | OutputKind::PageLogic
-        | OutputKind::Table
-        | OutputKind::DataFlow
-        | OutputKind::GraphDbCheck
-        | OutputKind::QueryAdvice => {}
-    }
+/// 清单只写这一处。新增 `OutputKind` 变体而漏写进来时，生成的 match 会编译失败；
+/// 写进来后 `all_output_kinds` 自动包含它，文档检查随之要求同步 schema.md。
+macro_rules! output_kind_registry {
+    ($($variant:ident),+ $(,)?) => {
+        /// 编译期完整性守卫：match 不含通配分支，漏登记变体即编译失败。
+        fn exhaustive_check(kind: &OutputKind) {
+            match kind {
+                $(OutputKind::$variant)|+ => {}
+            }
+        }
+
+        /// 清单中的全部变体。
+        fn all_output_kinds() -> Vec<OutputKind> {
+            vec![$(OutputKind::$variant),+]
+        }
+    };
 }
+
+output_kind_registry!(
+    SuperPage,
+    PageQuery,
+    ModelQuery,
+    CrossPageQuery,
+    DataFlowQuery,
+    ComponentQuery,
+    PriorityQuery,
+    Explain,
+    Context,
+    PageLogic,
+    Table,
+    DataFlow,
+    GraphDbCheck,
+    QueryAdvice,
+);
 
 /// 代码侧事实：每个变体经 serde 序列化后的线上字符串。
 fn emitted_kinds() -> Result<BTreeSet<String>> {
-    let all = [
-        OutputKind::SuperPage,
-        OutputKind::PageQuery,
-        OutputKind::ModelQuery,
-        OutputKind::CrossPageQuery,
-        OutputKind::DataFlowQuery,
-        OutputKind::ComponentQuery,
-        OutputKind::PriorityQuery,
-        OutputKind::Explain,
-        OutputKind::Context,
-        OutputKind::PageLogic,
-        OutputKind::Table,
-        OutputKind::DataFlow,
-        OutputKind::GraphDbCheck,
-        OutputKind::QueryAdvice,
-    ];
-    all.iter()
+    all_output_kinds()
+        .iter()
         .map(|kind| {
             exhaustive_check(kind);
             let value = serde_json::to_value(kind).context("序列化 OutputKind 失败")?;
