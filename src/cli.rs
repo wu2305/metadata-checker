@@ -192,36 +192,7 @@ pub struct Cli {
         long,
         value_name = "QUERY",
         help = "Run a read-only GQL query on a .grafeo graph (--graph-db-path). Schema: nodes (:Node {id,node_type,path,name,meta,origin_file}); edges [:<EdgeType> {field_path,meta,origin_file}], e.g. MATCH (a:Node)-[r:Reads]->(b:Node) RETURN a.id, b.id, r.field_path. Only MATCH/OPTIONAL/UNWIND/FOR/RETURN statements; writes and LOAD are rejected",
-        long_help = concat!(
-            "Run a read-only GQL query on a .grafeo graph (--graph-db-path).\n",
-            "\n",
-            "Schema:\n",
-            "  - Every project node has label Node with properties id, node_type, path, name, meta, origin_file.\n",
-            "    node_type is one of Page, Component, Model, Field, Action, Condition. Always write (n:Node);\n",
-            "    the graph also holds internal IndexState records.\n",
-            "  - id formats: page:app/x.spg | comp:app/x.spg|btn1 | action:app/x.spg|btn1|action1 |\n",
-            "    cond:app/x.spg|input1#visibleCondition#1 | model:model1 | field:model1.name\n",
-            "  - Edges are typed by EdgeType name (e.g. Reads, Contains, Triggers) and carry field_path, meta,\n",
-            "    origin_file. List the types with: MATCH ()-[r]->() RETURN DISTINCT type(r)\n",
-            "  - meta is JSON TEXT, not a map: return it to read it, filter it with CONTAINS. Keys by node_type:\n",
-            "      Component: component_type, json_path, parent_id, properties{exp,value,visibleCondition,...}\n",
-            "      Action:    triggerType, condition, conditionExp, waitPrev\n",
-            "      Condition: condition_type, effect_type, raw_expr, normalized_expr, owner_id, owner_type,\n",
-            "                 referenced_symbols[]\n",
-            "      Model:     modelType, sourcePath, dimensions[]\n",
-            "    Edge meta keys: actor_id, operation, reason, source_expr, target_model, target_field.\n",
-            "\n",
-            "Examples:\n",
-            "  MATCH (a:Node)-[r:Reads]->(b:Node) RETURN a.id, b.id, r.field_path\n",
-            "  MATCH (n:Node) WHERE n.meta CONTAINS 'visibleCondition' RETURN n.id\n",
-            "\n",
-            "Dialect notes:\n",
-            "  - Several edge types are written [:Reads|Triggers] (no colon before the second name).\n",
-            "  - Use the CONTAINS / STARTS WITH operators; there is no =~ regex and no CONTAINS() function.\n",
-            "  - Pattern predicates such as NOT (n)--() are not supported.\n",
-            "\n",
-            "Only MATCH/OPTIONAL/UNWIND/FOR/RETURN statements are accepted; writes, DDL and LOAD are rejected."
-        )
+        long_help = crate::graph_schema::gql_long_help()
     )]
     pub gql: Option<String>,
 
@@ -232,6 +203,12 @@ pub struct Cli {
         help = "Maximum rows returned by --gql; the result carries truncated=true when more rows matched (default: 200)"
     )]
     pub gql_max_rows: usize,
+
+    #[arg(
+        long,
+        help = "Print the graph schema contract (node and edge types, meta keys, id formats, interpretation rules, GQL dialect notes) as JSON; with --human, as Markdown. Needs no project or graph"
+    )]
+    pub graph_schema: bool,
 
     #[arg(
         long,

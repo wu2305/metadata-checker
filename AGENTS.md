@@ -82,6 +82,7 @@
 | `graph.rs` | 图节点/边等共享数据结构与通用 helper | 节点/边类型变更需同步 graph store、scanner、query 和序列化逻辑 |
 | `graph_redb.rs` | redb 图数据库实现（`cli-local`）与 graphdb lock | 修改 redb 表、锁、持久化行为需覆盖 native 回归 |
 | `graph_grafeo.rs` | Grafeo 图存储实现（`grafeo-store`，M59-3 C1+C2：图契约 + 索引状态/导入接线；C4：只读 GQL `query_gql_read_only`） | 存取路径只用直写 API；GQL 只经 `query_gql_read_only`（只读会话 + 形态闸，二者缺一不可，`LOAD` 会读本地文件）；改动须跑 B1 契约套件 + `m59_c1_grafeo_store_tests` + `m59_c2_grafeo_import_tests` + `m59_c4_grafeo_gql_tests` |
+| `graph_schema.rs` | 图 Schema 契约表（节点/边类型、端点组合、`meta` 键、解释规则）；`--graph-schema`、`--gql` long help、`docs/reference/graph-schema.md` 均由它生成 | 新增/修改节点或边类型、`meta` 键必须同改此表，并运行 `tests/graph_schema_tests.rs`；改表后用 `UPDATE_GRAPH_SCHEMA_DOC=1` 重新生成参考文档 |
 | `graph_store.rs` | GraphReadStore / GraphWriteStore / IndexStateStore 抽象 | query 层不得重新绑定具体 redb 实现 |
 | `scanner.rs` | 目录扫描、增量更新（mtime+size+hash）、SPG/TBL 处理、扫描诊断（SCANNER_*）持久化 | 增量逻辑涉及文件状态比较，改动需谨慎 |
 | `query.rs` | 图查询接口：`query_model`/`query_page`/`query_cross`/`query_dataflow` | DataFlow 子图展开涉及字段级追溯，较复杂 |
