@@ -170,6 +170,29 @@ fn resolver_reports_why_a_reference_cannot_resolve() {
             reference: "https://host/page.spg".to_string()
         })
     );
+    // 前缀后面的 URI 同样不是项目内路径（不能被归一成 `app/.../https:/host/...`）
+    for uri in ["$TAPP:https://host/page.spg", "$APP:/https://host/page.spg"] {
+        assert_eq!(
+            resolve_reference_target(CURRENT_PAGE, uri),
+            Err(ReferenceUnresolved::Uri {
+                reference: uri.to_string()
+            }),
+            "{uri}"
+        );
+    }
+    // 扫描根在项目根之上时，无前缀的 `..` 也不得跳进兄弟项目
+    let nested_page = "xiaoshouyi/app/售后.app/首页.spg";
+    assert_eq!(
+        resolve_reference_target(nested_page, "../../../other.spg"),
+        Err(ReferenceUnresolved::EscapesRoot {
+            reference: "../../../other.spg".to_string()
+        })
+    );
+    assert_eq!(
+        resolve_reference_target(nested_page, "../../ana/页.spg"),
+        Ok("xiaoshouyi/ana/页.spg".to_string()),
+        "仍在项目根之内的 `..` 照常归一"
+    );
     // 文件发现只认小写 `.spg`；大写扩展名的文件不会被索引，所以不当作页面
     assert_eq!(
         resolve_reference_target(CURRENT_PAGE, "子页/详情.SPG"),

@@ -217,13 +217,21 @@ pub fn resolve_reference_target(
                 });
             }
         };
+        // 前缀后面跟 URI（`$TAPP:https://host/p.spg`）同样不是项目内路径；
+        // 不拦的话 `https://` 会被归一成相对目录 `https:/`，造出磁盘上没有的页面。
+        let rest = rest.trim_start_matches(['/', '\\']);
+        if has_uri_scheme(rest) {
+            return Err(ReferenceUnresolved::Uri {
+                reference: reference.to_string(),
+            });
+        }
         // 先在前缀自己的命名空间里归一：`..` 不得跳出前缀锚点
         // （如 `$TAPP:/../b.app/x.spg` 不能借 `..` 离开当前应用）。
-        let anchored =
-            crate::graph_identity::normalize_project_path(rest.trim_start_matches(['/', '\\']))
-                .map_err(|_| ReferenceUnresolved::EscapesRoot {
-                    reference: reference.to_string(),
-                })?;
+        let anchored = crate::graph_identity::normalize_project_path(rest).map_err(|_| {
+            ReferenceUnresolved::EscapesRoot {
+                reference: reference.to_string(),
+            }
+        })?;
         format!("{base}/{anchored}")
     } else if has_uri_scheme(reference) {
         return Err(ReferenceUnresolved::Uri {
@@ -247,6 +255,18 @@ pub fn resolve_reference_target(
             reference: reference.to_string(),
         }
     })?;
+    // 扫描根可能在项目根之上（`projects/<x>/app/...`）：`..` 不得借此跳进兄弟项目。
+    // 能推断出项目根时，结果必须仍在根之下；推断不出（没有 app/ana/data 线索）时只受扫描根约束。
+    if let Some(root) = locate_project_root(&segments, locate_app_dir(&segments))
+        && !root.is_empty()
+    {
+        let root_prefix = format!("{}/", root.join("/"));
+        if !normalized.starts_with(&root_prefix) {
+            return Err(ReferenceUnresolved::EscapesRoot {
+                reference: reference.to_string(),
+            });
+        }
+    }
     // 与文件发现（`discover_files` 只认小写 `spg` 扩展名）同一口径：大小写不同的文件
     // 不会被索引，指向它的引用只会留下没有定义的空页面。
     if !normalized.ends_with(".spg") {
