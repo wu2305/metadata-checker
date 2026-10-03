@@ -19,7 +19,7 @@
 ```json
 {
   "schema_version": "1.0",
-  "kind": "SuperPage | PageQuery | ModelQuery | CrossPageQuery | DataFlowQuery | ComponentQuery | PriorityQuery | Explain | Context | PageLogic | QueryAdvice | Table | DataFlow | GraphDbCheck",
+  "kind": "SuperPage | PageQuery | ModelQuery | CrossPageQuery | DataFlowQuery | ComponentQuery | PriorityQuery | Explain | Context | PageLogic | Table | DataFlow | GraphDbCheck",
   "query_target": "可选，被查询对象的 ID 或标识",
   "summary": { /* 低噪声摘要，模型优先读取 */ },
   "details": { /* 可选的详细信息，按需展开 */ },
