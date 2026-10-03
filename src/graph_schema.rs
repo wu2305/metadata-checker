@@ -142,8 +142,23 @@ pub struct GraphLabels {
     pub project_node: &'static str,
     pub node_properties: &'static [&'static str],
     pub edge_properties: &'static [&'static str],
-    /// 图库里同时存在的内部记录标签，查询时不要碰。
+    /// 图库里同时存在的索引记录标签（不是项目节点，用 `(s:IndexState)` 单独匹配）。
     pub internal_label: &'static str,
+    /// 索引记录的固有属性（`value` 是 JSON 文本）。
+    pub internal_properties: &'static [&'static str],
+    /// 对回答问题有用的索引记录；其余 key 是内部实现，不要依赖。
+    pub internal_records: &'static [IndexStateRecord],
+}
+
+/// 一类可查询的索引记录（`IndexState` 标签，`key` 以固定前缀区分）。
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct IndexStateRecord {
+    /// key 的形态，如 `file_state:<file path>`。
+    pub key_form: &'static str,
+    /// 这类记录说明什么、能拿它下什么结论。
+    pub meaning: &'static str,
+    /// `value`（JSON 文本）里有哪些字段。
+    pub value_shape: &'static str,
 }
 
 /// 一条示例查询。每条都由测试在夹具图上真实执行，保证示例不会过期。
@@ -1195,7 +1210,7 @@ const DIALECT_NOTES: &[&str] = &[
     "Use the CONTAINS / STARTS WITH operators; there is no =~ regex and no CONTAINS() function.",
     "Pattern predicates such as NOT (n)--() are not supported.",
     "meta is JSON text, not a map: return it to read it, filter it with CONTAINS; n.meta.exp is a syntax error.",
-    "Always write (n:Node); the graph also holds internal IndexState records.",
+    "Match project nodes as (n:Node). The graph also holds IndexState records; match those as (s:IndexState) with s.key and s.value (JSON text), see the index records in the schema.",
 ];
 
 const LABELS: GraphLabels = GraphLabels {
@@ -1203,6 +1218,19 @@ const LABELS: GraphLabels = GraphLabels {
     node_properties: &["id", "node_type", "path", "name", "meta", "origin_file"],
     edge_properties: &["field_path", "meta", "origin_file"],
     internal_label: "IndexState",
+    internal_properties: &["key", "value"],
+    internal_records: &[
+        IndexStateRecord {
+            key_form: "file_state:<file path>",
+            meaning: "One per scanned file, including a page with no canvas. Its presence is the evidence that the file was scanned; a Page node without it was created from a link or embed target.",
+            value_shape: "JSON: file_path, file_hash, mtime, size, node_ids (the node ids the file produced).",
+        },
+        IndexStateRecord {
+            key_form: "scanner_entry:<file path>",
+            meaning: "Scan diagnostics of one file: what the scanner could not use. This is where an unresolved link or embed target, a duplicate component id or a parse failure is recorded.",
+            value_shape: "JSON: counts unrecognized_container_key, duplicate_component_id, parse_failed, unresolved_reference, and occurrences, an array with one item per problem: code (SCANNER_UNRESOLVED_REFERENCE, ...), location {source_file, node_id, json_path}, detail (the reason).",
+        },
+    ],
 };
 
 const SCHEMA: GraphSchema = GraphSchema {
@@ -1323,9 +1351,19 @@ pub fn to_markdown() -> String {
     );
     let _ = writeln!(
         out,
-        "- The graph also holds internal `{}` records; always write `(n:{})`.",
-        labels.internal_label, labels.project_node
+        "- The graph also holds `{}` records (not project nodes) with properties {}; match them as `(s:{})`, never as `(n:{})`.",
+        labels.internal_label,
+        quoted_list(labels.internal_properties),
+        labels.internal_label,
+        labels.project_node
     );
+    for record in labels.internal_records {
+        let _ = writeln!(
+            out,
+            "  - `{}`: {} Value: {}",
+            record.key_form, record.meaning, record.value_shape
+        );
+    }
     let _ = writeln!(out, "- `meta` is JSON text, not a map.");
     let _ = writeln!(out);
     let _ = writeln!(out, "## Node types");
@@ -1467,6 +1505,20 @@ pub fn gql_long_help() -> String {
             "      {}  ({})",
             variant_name(&row.edge_type),
             endpoints.join(", ")
+        );
+    }
+    let _ = writeln!(
+        out,
+        "  - {} records (match as (s:{}), properties {}):",
+        labels.internal_label,
+        labels.internal_label,
+        labels.internal_properties.join(", ")
+    );
+    for record in labels.internal_records {
+        let _ = writeln!(
+            out,
+            "      {}: {} Value: {}",
+            record.key_form, record.meaning, record.value_shape
         );
     }
     let _ = writeln!(out, "  - meta keys by node_type:");

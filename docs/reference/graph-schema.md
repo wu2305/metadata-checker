@@ -6,7 +6,9 @@ Generated from `src/graph_schema.rs` by `metadata-checker --graph-schema --human
 
 - Project nodes have label `Node` with properties `id`, `node_type`, `path`, `name`, `meta`, `origin_file`.
 - Edges are typed by edge-type name and carry `field_path`, `meta`, `origin_file`.
-- The graph also holds internal `IndexState` records; always write `(n:Node)`.
+- The graph also holds `IndexState` records (not project nodes) with properties `key`, `value`; match them as `(s:IndexState)`, never as `(n:Node)`.
+  - `file_state:<file path>`: One per scanned file, including a page with no canvas. Its presence is the evidence that the file was scanned; a Page node without it was created from a link or embed target. Value: JSON: file_path, file_hash, mtime, size, node_ids (the node ids the file produced).
+  - `scanner_entry:<file path>`: Scan diagnostics of one file: what the scanner could not use. This is where an unresolved link or embed target, a duplicate component id or a parse failure is recorded. Value: JSON: counts unrecognized_container_key, duplicate_component_id, parse_failed, unresolved_reference, and occurrences, an array with one item per problem: code (SCANNER_UNRESOLVED_REFERENCE, ...), location {source_file, node_id, json_path}, detail (the reason).
 - `meta` is JSON text, not a map.
 
 ## Node types
@@ -525,4 +527,4 @@ Declared in the enum, never written by the scanner. Dataflow internals live in t
 - Use the CONTAINS / STARTS WITH operators; there is no =~ regex and no CONTAINS() function.
 - Pattern predicates such as NOT (n)--() are not supported.
 - meta is JSON text, not a map: return it to read it, filter it with CONTAINS; n.meta.exp is a syntax error.
-- Always write (n:Node); the graph also holds internal IndexState records.
+- Match project nodes as (n:Node). The graph also holds IndexState records; match those as (s:IndexState) with s.key and s.value (JSON text), see the index records in the schema.
