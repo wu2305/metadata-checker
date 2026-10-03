@@ -40,10 +40,7 @@ pub fn process_tbl_file_from_string(
     let mut model_meta = serde_json::json!({"modelType": model_type});
     // 显式空串 = 未落表数据流；缺省键是另一回事（语义未确认），不在此断言。
     // 后面的 DataFlow 元数据增强会重建 meta 再 upsert，必须把这个标记带过去。
-    let unlanded = value
-        .pointer("/properties/dbTableName")
-        .and_then(|v| v.as_str())
-        .is_some_and(str::is_empty);
+    let unlanded = is_dataflow && has_empty_db_table_name(&value);
     if unlanded && let Some(obj) = model_meta.as_object_mut() {
         obj.insert("landed".to_string(), serde_json::json!(false));
     }
@@ -442,10 +439,22 @@ pub fn process_tbl_file_from_string(
 /// 空串是合法形态，不是错误：它表示**未落表**的数据流（即时取数的逻辑，没有物理输出表）。
 /// 语料里 38 张表如此（均为 dataFlow，维护者 2026-10-03 确认）。
 fn output_table_name(value: &serde_json::Value) -> Option<&str> {
+    let name = value
+        .pointer("/properties/dbTableName")
+        .and_then(|v| v.as_str())?;
+    // 空串只对数据流合法；其它表的空名不放行（由 `validate_table_identities` 报错）。
+    if name.is_empty() && value.get("dataFlow").is_some() {
+        return None;
+    }
+    Some(name)
+}
+
+/// `properties.dbTableName` 是显式空串。
+fn has_empty_db_table_name(value: &serde_json::Value) -> bool {
     value
         .pointer("/properties/dbTableName")
         .and_then(|v| v.as_str())
-        .filter(|name| !name.is_empty())
+        .is_some_and(str::is_empty)
 }
 
 fn validate_table_identities(value: &serde_json::Value, model_name: &str) -> Result<()> {
@@ -458,6 +467,10 @@ fn validate_table_identities(value: &serde_json::Value, model_name: &str) -> Res
         {
             global_node_id(NodeIdKind::Field, &format!("{model_name}.{name}"))?;
         }
+    }
+    if value.get("dataFlow").is_none() && has_empty_db_table_name(value) {
+        // 未落表只是数据流的形态；其它表的空输出表名是真正的格式问题，不静默放行
+        bail!("table {model_name} has an empty properties.dbTableName but is not a DataFlow");
     }
     if let Some(name) = output_table_name(value) {
         global_node_id(NodeIdKind::Model, name)?;

@@ -111,6 +111,20 @@ fn resolver_reports_why_a_reference_cannot_resolve() {
             "{drive}"
         );
     }
+    // URI 不是项目内路径，不能被拼成 `app/.../https:/host/...` 之类的假路径
+    assert_eq!(
+        resolve_reference_target(CURRENT_PAGE, "https://host/page.spg"),
+        Err(ReferenceUnresolved::Uri {
+            reference: "https://host/page.spg".to_string()
+        })
+    );
+    // 文件发现只认小写 `.spg`；大写扩展名的文件不会被索引，所以不当作页面
+    assert_eq!(
+        resolve_reference_target(CURRENT_PAGE, "子页/详情.SPG"),
+        Err(ReferenceUnresolved::NotAPage {
+            target: "app/售后.app/工单/子页/详情.SPG".to_string()
+        })
+    );
     assert_eq!(
         resolve_reference_target(CURRENT_PAGE, "附件/说明.docx"),
         Err(ReferenceUnresolved::NotAPage {
@@ -407,4 +421,122 @@ fn old_format_fingerprint_forces_a_rescan_after_a_semantics_change() -> anyhow::
 
     let _ = std::fs::remove_dir_all(&project_dir);
     Ok(())
+}
+
+/// `resPath` / `path` 不是数字时同样是一处无法解析的引用：不建边，且必须记诊断。
+#[test]
+fn malformed_reference_indices_are_reported() -> anyhow::Result<()> {
+    let project_dir = unique_temp_dir("bad-index");
+    let page_dir = project_dir.join("app/售后.app/工单");
+    std::fs::create_dir_all(&page_dir)?;
+    let page = serde_json::json!({
+        "referenceResources": ["$TAPP:/预约/编辑.spg"],
+        "canvas": {"id": "canvas", "type": "canvas", "components": [
+            {"id": "embed_bad", "type": "embedsuperpage", "resPath": "abc"},
+            {"id": "btn", "type": "button", "actions": [
+                {"id": "go_bad", "actionType": "link", "triggerType": "click",
+                 "targetType": "app", "path": "-1"}
+            ]}
+        ]}
+    });
+    std::fs::write(page_dir.join("首页.spg"), serde_json::to_string(&page)?)?;
+    let db_path = project_dir.join("graph.db");
+    ProjectIndexer::scan_with_diagnostics(&project_dir, &db_path)?;
+
+    let entries = GraphDB::open(&db_path)?.load_scanner_diagnostic_entries()?;
+    let report = ProjectIndexer::merge_scanner_occurrence_entries(&entries)?;
+    let mut nodes: Vec<String> = report
+        .occurrences
+        .iter()
+        .filter(|record| record.code == CODE_UNRESOLVED)
+        .map(|record| record.location.node_id.clone().unwrap_or_default())
+        .collect();
+    nodes.sort();
+    let page_key = "app/售后.app/工单/首页.spg";
+    assert_eq!(
+        nodes,
+        vec![
+            format!("action:{page_key}|btn|go_bad"),
+            format!("comp:{page_key}|embed_bad")
+        ],
+        "{report:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(&project_dir);
+    Ok(())
+}
+
+/// 目标页面解析不了时，link 动作参数表达式里对源模型的读取仍然入图（与目标无关的事实）。
+#[test]
+fn unresolved_link_target_keeps_action_reads_from_parameters() -> anyhow::Result<()> {
+    let project_dir = unique_temp_dir("link-reads");
+    let page_dir = project_dir.join("app/售后.app/工单");
+    std::fs::create_dir_all(&page_dir)?;
+    let page = serde_json::json!({
+        "referenceResources": ["$ANA:/价审/政策.rpt"],
+        "sources": [{"id": "model1", "modelType": "dwtable", "path": "data/orders.tbl"}],
+        "canvas": {"id": "canvas", "type": "canvas", "components": [
+            {"id": "btn", "type": "button", "actions": [
+                {"id": "open_report", "actionType": "link", "triggerType": "click",
+                 "targetType": "app", "path": 0,
+                 "data": [{"name": "orderId", "value": "=model1.orderId"}]}
+            ]}
+        ]}
+    });
+    std::fs::write(page_dir.join("首页.spg"), serde_json::to_string(&page)?)?;
+    let db_path = project_dir.join("graph.db");
+    ProjectIndexer::scan_with_diagnostics(&project_dir, &db_path)?;
+
+    let graph = GraphDB::open(&db_path)?;
+    let action_id = "action:app/售后.app/工单/首页.spg|btn|open_report";
+    let mut read_targets: Vec<String> = graph
+        .graph
+        .raw_edges()
+        .iter()
+        .filter(|edge| {
+            edge.weight.edge_type == EdgeType::ActionReads && edge.weight.from == action_id
+        })
+        .map(|edge| edge.weight.to.clone())
+        .collect();
+    read_targets.sort();
+    assert_eq!(
+        read_targets,
+        vec![
+            "field:model1.orderId".to_string(),
+            "field:orders.orderId".to_string(),
+            "model:model1".to_string(),
+            "model:orders".to_string()
+        ],
+        "model1.orderId 的读取（含它指向的物理表）不依赖目标页面"
+    );
+    let navigates = graph
+        .graph
+        .raw_edges()
+        .iter()
+        .filter(|edge| edge.weight.edge_type == EdgeType::ActionNavigates)
+        .count();
+    assert_eq!(navigates, 0, "目标是报表，不建导航边");
+
+    let _ = std::fs::remove_dir_all(&project_dir);
+    Ok(())
+}
+
+/// 空 `dbTableName` 只对数据流合法；其它表类型的空名仍然报错，不静默当作无输出。
+#[test]
+fn empty_db_table_name_on_a_non_dataflow_is_still_rejected() {
+    use metadata_checker::memory_graph_store::MemoryGraphStore;
+    use metadata_checker::scanner::process_tbl_file_from_string;
+
+    let content = serde_json::json!({
+        "properties": {"dbTableName": ""},
+        "dimensions": [{"name": "金额"}]
+    })
+    .to_string();
+    let mut graph = MemoryGraphStore::new();
+    let error = process_tbl_file_from_string(&mut graph, "订单.tbl", &content)
+        .expect_err("非数据流的空 dbTableName 不应放行");
+    assert!(
+        error.to_string().contains("not a DataFlow"),
+        "错误要点名原因: {error}"
+    );
 }

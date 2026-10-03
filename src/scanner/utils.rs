@@ -97,12 +97,16 @@ pub fn add_edge_with_meta(
 pub enum ReferenceUnresolved {
     /// `referenceResources` 里没有这个下标
     IndexOutOfRange { index: usize, len: usize },
+    /// `resPath` / `path` 不是合法的非负整数下标（如 `"abc"`、`-1`）
+    MalformedIndex { value: String },
     /// 前缀（`$APP:` 等）需要项目的 app 目录结构才能展开，但本文件不在 `app/<name>.app/` 之下
     NoAppRoot { prefix: &'static str },
     /// 不认识的 `$XXX:` 前缀（含图片类 `$ICON:` 等资源前缀）
     UnknownPrefix { reference: String },
     /// 绝对路径（如 `/sysdata/...`）：指向平台系统工程，不在本仓库里
     AbsolutePath { reference: String },
+    /// URI（如 `https://host/page.spg`）：不是项目内路径
+    Uri { reference: String },
     /// `..` 越出项目根
     EscapesRoot { reference: String },
     /// 目标不是 `.spg` 页面（`.rpt`、`.action`、`.docx` 等），图里没有对应的页面节点
@@ -116,6 +120,13 @@ impl std::fmt::Display for ReferenceUnresolved {
                 f,
                 "referenceResources index {index} is out of range (len {len})"
             ),
+            Self::MalformedIndex { value } => write!(
+                f,
+                "reference index is not a non-negative integer: {value:?}"
+            ),
+            Self::Uri { reference } => {
+                write!(f, "URI reference is not a project path: {reference}")
+            }
             Self::NoAppRoot { prefix } => write!(
                 f,
                 "prefix {prefix} needs an app/<name>.app directory in the file path"
@@ -181,6 +192,10 @@ pub fn resolve_reference_target(
             }
         };
         format!("{base}/{}", rest.trim_start_matches('/'))
+    } else if has_uri_scheme(reference) {
+        return Err(ReferenceUnresolved::Uri {
+            reference: reference.to_string(),
+        });
     } else if reference.starts_with(['/', '\\']) || has_drive_prefix(reference) {
         return Err(ReferenceUnresolved::AbsolutePath {
             reference: reference.to_string(),
@@ -199,7 +214,9 @@ pub fn resolve_reference_target(
             reference: reference.to_string(),
         }
     })?;
-    if !normalized.to_ascii_lowercase().ends_with(".spg") {
+    // 与文件发现（`discover_files` 只认小写 `spg` 扩展名）同一口径：大小写不同的文件
+    // 不会被索引，指向它的引用只会留下没有定义的空页面。
+    if !normalized.ends_with(".spg") {
         return Err(ReferenceUnresolved::NotAPage { target: normalized });
     }
     Ok(normalized)
@@ -210,6 +227,19 @@ pub fn resolve_reference_target(
 fn has_drive_prefix(reference: &str) -> bool {
     let bytes = reference.as_bytes();
     bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+}
+
+/// URI scheme（`https:`、`file:`、`mailto:` 等，至少两个字符，与单字符盘符区分）。
+fn has_uri_scheme(reference: &str) -> bool {
+    let Some(colon) = reference.find(':') else {
+        return false;
+    };
+    let scheme = &reference[..colon];
+    scheme.len() >= 2
+        && scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
 }
 
 /// 拆出 `$XXX:` 前缀；`$` 开头但没有冒号的不算前缀。

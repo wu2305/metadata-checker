@@ -101,14 +101,14 @@ pub fn parse_tbl_from_value_with_source(source: &SourceId, raw: Value) -> Result
     let props = obj
         .and_then(|o| o.get("properties"))
         .and_then(|v| v.as_object());
-    // 空串是未落表数据流（没有物理输出表），与项目扫描口径一致，按「没有」处理。
+    meta.is_dataflow = raw.get("dataFlow").is_some();
+    // 数据流的空串是未落表（没有物理输出表），与项目扫描口径一致，按「没有」处理；
+    // 其它表类型不做这个例外。
     meta.db_table_name = props
         .and_then(|p| p.get("dbTableName"))
         .and_then(|v| v.as_str())
-        .filter(|name| !name.is_empty())
+        .filter(|name| !name.is_empty() || !meta.is_dataflow)
         .map(String::from);
-
-    meta.is_dataflow = raw.get("dataFlow").is_some();
 
     // Table name from properties.name or source_path basename
     let basename = std::path::Path::new(&source.source_path)
