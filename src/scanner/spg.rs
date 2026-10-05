@@ -3,6 +3,7 @@ use super::{
 };
 use crate::graph::{EdgeType, NodeType};
 use crate::graph_store::GraphWriteStore;
+use crate::graph_write_guard::SchemaGuard;
 use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -989,6 +990,32 @@ pub fn process_spg_file_from_value_with_identity(
     raw_value: serde_json::Value,
     identity_mode: PageIdentityMode,
 ) -> Result<Vec<String>> {
+    process_spg_file_with_schema(
+        graph,
+        rel_path,
+        raw_value,
+        identity_mode,
+        crate::graph_schema::schema(),
+    )
+}
+
+/// 同 [`process_spg_file_from_value_with_identity`]，但写入校验对照指定的契约表。
+///
+/// 生产路径固定用 [`crate::graph_schema::schema`]；这个入口存在是为了让测试能用「少一行 /
+/// 多一个必需键」的表对**整条扫描路径**验证每类违规都被拒收，而不是只测守卫本身。
+///
+/// L0 写入校验：本文件写出的每个节点和边先过 [`SchemaGuard`]，违规即返回错误
+/// （含文件、节点或边、原因），不转发给存储。
+pub fn process_spg_file_with_schema(
+    graph: &mut dyn GraphWriteStore,
+    rel_path: &str,
+    raw_value: serde_json::Value,
+    identity_mode: PageIdentityMode,
+    schema: &crate::graph_schema::GraphSchema,
+) -> Result<Vec<String>> {
+    let mut guard = SchemaGuard::with_schema(graph, schema, rel_path);
+    // 遮蔽入参：下面的函数体原样使用 `graph`，写入全部经过守卫
+    let graph: &mut dyn GraphWriteStore = &mut guard;
     let component_contexts = collect_component_contexts(&raw_value);
     let meta = crate::superpage::parse_superpage_from_value(raw_value)?;
     let mut node_ids = std::collections::HashSet::new();

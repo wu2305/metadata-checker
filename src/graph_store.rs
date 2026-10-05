@@ -37,6 +37,9 @@ pub enum GraphStoreError {
     Corrupted { reason: String },
     /// 不支持的操作
     UnsupportedOperation { message: String },
+    /// 写入的节点或边违反 `graph_schema.rs` 契约表（L0 写入校验）；
+    /// `message` 已含源文件、节点或边与具体原因。
+    SchemaViolation { message: String },
 }
 
 impl GraphStoreError {
@@ -54,6 +57,7 @@ impl GraphStoreError {
             GraphStoreError::PermissionDenied { .. } => "GRAPH_DB_PERMISSION_DENIED",
             GraphStoreError::Corrupted { .. } => "GRAPH_DB_CORRUPTED",
             GraphStoreError::UnsupportedOperation { .. } => "GRAPH_DB_UNSUPPORTED_OPERATION",
+            GraphStoreError::SchemaViolation { .. } => "GRAPH_SCHEMA_VIOLATION",
         }
     }
 }
@@ -93,6 +97,9 @@ impl fmt::Display for GraphStoreError {
             }
             GraphStoreError::UnsupportedOperation { message } => {
                 write!(f, "Graph store unsupported operation: {}", message)
+            }
+            GraphStoreError::SchemaViolation { message } => {
+                write!(f, "Graph schema violation: {}", message)
             }
         }
     }
@@ -252,6 +259,13 @@ pub trait GraphWriteStore {
 
     /// 按 ID 列表删除节点
     fn remove_nodes_by_ids(&mut self, node_ids: &[String]) -> GraphStoreResult<()>;
+
+    /// 已写入节点的类型；节点不存在返回 `None`。
+    ///
+    /// 写入校验（[`crate::graph_write_guard::SchemaGuard`]）要靠它解析边的端点类型：
+    /// 增量扫描时边可以指向别的文件早已写入的节点，只看本次写过的节点不够。
+    /// 只读取类型，不构造整个 `Node`（Grafeo 侧要解析 meta 文本，这里不需要）。
+    fn node_type_of(&self, node_id: &str) -> GraphStoreResult<Option<crate::graph::NodeType>>;
 }
 
 /// 组合读写 trait（用于需要同时读写的场景）

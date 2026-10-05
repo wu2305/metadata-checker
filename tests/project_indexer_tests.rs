@@ -308,6 +308,15 @@ fn test_project_indexer_apply_graph_updates_accepts_write_only_store() {
             self.removed.extend(node_ids.iter().cloned());
             Ok(())
         }
+
+        fn node_type_of(&self, node_id: &str) -> GraphStoreResult<Option<NodeType>> {
+            Ok(self
+                .nodes
+                .iter()
+                .rev()
+                .find(|node| node.id == node_id)
+                .map(|node| node.node_type.clone()))
+        }
     }
 
     let update = ParsedGraphUpdate {

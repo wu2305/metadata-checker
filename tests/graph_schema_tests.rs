@@ -9,10 +9,9 @@
 //!    `--gql` 的 help 与 JSON 输出都来自同一张表。
 #![cfg(feature = "grafeo-store")]
 
-use metadata_checker::graph::{EdgeType, NodeType};
-use metadata_checker::graph_schema::{self, FieldPathUse, MetaKeySchema, variant_name};
+use metadata_checker::graph::{Edge, EdgeType, Node, NodeType};
+use metadata_checker::graph_schema::{self, variant_name};
 use serde_json::Value;
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -251,92 +250,42 @@ fn gql_rows(db: &Path, query: &str) -> Vec<Vec<Value>> {
         .collect()
 }
 
-/// `meta` 列是 JSON 文本；解析成键值对（没有 meta 时为空）。
-fn meta_object(meta: &Value) -> BTreeMap<String, Value> {
-    match meta.as_str() {
-        Some(text) => {
-            let parsed: Value = serde_json::from_str(text).expect("meta 是 JSON 文本");
-            parsed
-                .as_object()
-                .map(|object| {
-                    object
-                        .iter()
-                        .map(|(key, value)| (key.clone(), value.clone()))
-                        .collect()
-                })
-                .unwrap_or_default()
-        }
-        None => BTreeMap::new(),
-    }
-}
-
-/// 一组 `meta` 键值对相对契约键表的违规：未声明的键（开放 meta 除外）、值类型不符、
-/// 不允许 null 的键为 null。
-fn meta_violations(
-    owner: &str,
-    declared: &[MetaKeySchema],
-    open: bool,
-    actual: &BTreeMap<String, Value>,
-) -> Vec<String> {
-    let mut violations = Vec::new();
-    for (name, value) in actual {
-        let Some(key) = declared.iter().find(|candidate| candidate.name == name) else {
-            if !open {
-                violations.push(format!("{owner} 的 meta 键未声明：{name}"));
-            }
-            continue;
-        };
-        if value.is_null() {
-            if !key.nullable {
-                violations.push(format!("{owner} 的 meta 键 {name} 为 null，契约不允许"));
-            }
-        } else if !key.value_type.accepts(value) {
-            violations.push(format!(
-                "{owner} 的 meta 键 {name} 类型不符：契约 {}，实际 {value}",
-                key.value_type.as_str()
-            ));
-        }
-    }
-    violations
+/// `meta` 列是 JSON 文本；还原成 `Option<Value>`（没有 meta 时为 `None`）。
+fn meta_value(meta: &Value) -> Option<Value> {
+    meta.as_str()
+        .map(|text| serde_json::from_str(text).expect("meta 是 JSON 文本"))
 }
 
 /// 逐元素核对一张图，返回全部违规（空表示合规）。
+///
+/// 判定规则不在这里：节点与边都交给 `graph_schema::node_violations` /
+/// `edge_violations`——写入校验（`SchemaGuard`）拦截违规时用的是同一对函数，
+/// 所以「落库的图合规」与「写入时不被拒」不会是两套标准。这里只负责把 GQL 行
+/// 还原成 `Node` / `Edge`，并报告还原不了的（未知类型）。
 fn conformance_violations(db: &Path) -> Vec<String> {
     let schema = graph_schema::schema();
     let mut violations = Vec::new();
-    let mut node_types_by_id = std::collections::HashMap::new();
+    let mut node_types_by_id: std::collections::HashMap<String, NodeType> =
+        std::collections::HashMap::new();
 
     for row in gql_rows(db, "MATCH (n:Node) RETURN n.id, n.node_type, n.meta") {
         let id = row[0].as_str().expect("id").to_string();
         let type_name = row[1].as_str().expect("node_type").to_string();
-        let Some(node_row) = all_node_types()
-            .into_iter()
-            .find(|candidate| variant_name(candidate) == type_name)
-            .and_then(|candidate| schema.node_row(&candidate))
+        let Ok(node_type) = serde_json::from_value::<NodeType>(Value::String(type_name.clone()))
         else {
             violations.push(format!("未知 node_type {type_name}（{id}）"));
             continue;
         };
-        let prefix = id.split(':').next().unwrap_or_default();
-        if !node_row.id_prefixes.contains(&prefix) {
-            violations.push(format!("{type_name} 节点的 id 前缀不在契约内：{id}"));
-        }
-        let actual = meta_object(&row[2]);
-        violations.extend(meta_violations(
-            &format!("{type_name} 节点 {id}"),
-            node_row.meta_keys,
-            node_row.meta_open,
-            &actual,
-        ));
-        for key in node_row.meta_keys.iter().filter(|key| key.required) {
-            if !actual.contains_key(key.name) {
-                violations.push(format!(
-                    "{type_name} 节点 {id} 缺少必需 meta 键：{}",
-                    key.name
-                ));
-            }
-        }
-        node_types_by_id.insert(id, type_name);
+        let node = Node {
+            id: id.clone(),
+            node_type: node_type.clone(),
+            path: String::new(),
+            name: String::new(),
+            meta: meta_value(&row[2]),
+            origin_file: None,
+        };
+        violations.extend(graph_schema::node_violations(schema, &node, false));
+        node_types_by_id.insert(id, node_type);
     }
 
     let edges = gql_rows(
@@ -346,47 +295,32 @@ fn conformance_violations(db: &Path) -> Vec<String> {
     for row in edges {
         let type_name = row[0].as_str().expect("edge type").to_string();
         let (from_id, to_id) = (row[1].as_str().expect("from"), row[2].as_str().expect("to"));
-        let Some(edge_row) = all_edge_types()
-            .into_iter()
-            .find(|candidate| variant_name(candidate) == type_name)
-            .and_then(|candidate| schema.edge_row(&candidate))
+        let Ok(edge_type) = serde_json::from_value::<EdgeType>(Value::String(type_name.clone()))
         else {
             violations.push(format!("未知边类型 {type_name}（{from_id} -> {to_id}）"));
             continue;
         };
-        if !edge_row.emitted {
+        let (Some(from_type), Some(to_type)) =
+            (node_types_by_id.get(from_id), node_types_by_id.get(to_id))
+        else {
             violations.push(format!(
-                "契约声明不会产生的边出现了：{type_name}（{from_id} -> {to_id}）"
+                "{type_name} 的端点节点不在图里（{from_id} -> {to_id}）"
             ));
             continue;
-        }
-        let from_type = node_types_by_id.get(from_id).cloned().unwrap_or_default();
-        let to_type = node_types_by_id.get(to_id).cloned().unwrap_or_default();
-        let allowed = edge_row
-            .endpoints
-            .iter()
-            .any(|pair| variant_name(&pair.from) == from_type && variant_name(&pair.to) == to_type);
-        if !allowed {
-            violations.push(format!(
-                "{type_name} 的端点组合不在契约内：{from_type} -> {to_type}（{from_id} -> {to_id}）"
-            ));
-        }
-        let has_field_path = !row[3].is_null();
-        match (edge_row.field_path, has_field_path) {
-            (FieldPathUse::Never, true) => violations.push(format!(
-                "{type_name}（{from_id} -> {to_id}）不该有 field_path"
-            )),
-            (FieldPathUse::Always, false) => violations.push(format!(
-                "{type_name}（{from_id} -> {to_id}）缺少 field_path"
-            )),
-            // Sometimes：取决于端点组合，行内说明；这里不逐边判
-            _ => {}
-        }
-        violations.extend(meta_violations(
-            &format!("{type_name}（{from_id} -> {to_id}）"),
-            edge_row.meta_keys,
-            false,
-            &meta_object(&row[4]),
+        };
+        let edge = Edge {
+            from: from_id.to_string(),
+            to: to_id.to_string(),
+            edge_type,
+            field_path: row[3].as_str().map(str::to_string),
+            meta: meta_value(&row[4]),
+            origin_file: None,
+        };
+        violations.extend(graph_schema::edge_violations(
+            schema,
+            &edge,
+            Some(from_type),
+            Some(to_type),
         ));
     }
     violations
@@ -450,17 +384,13 @@ fn computed_dimension_meta_keys_are_declared() {
         let Some(meta) = node.meta.as_ref().and_then(Value::as_object) else {
             continue;
         };
-        let actual: BTreeMap<String, Value> = meta
-            .iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
-        seen_models_key |= actual.contains_key("source_expr_models");
+        seen_models_key |= meta.contains_key("source_expr_models");
         assert_eq!(
-            meta_violations(
+            graph_schema::meta_violations(
                 &format!("Field 节点 {}", node.id),
                 field_row.meta_keys,
                 field_row.meta_open,
-                &actual
+                meta
             ),
             Vec::<String>::new()
         );
