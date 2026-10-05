@@ -6,7 +6,8 @@
 > [Grafeo 后端迁移设计](2026-09-05-grafeo-backend-migration-design.md)、[`--gql` 现状](../knowledge/topic-grafeo-gql.md)
 > 方向来源：2026-10-02 用户——「LLM 可以直接查 Grafeo，这个工具的功能可以大幅改变、重新判断」
 > 范围：`.fapp`、`.meta`、`.wfl` 三类文件不在本文考虑内，也不解析（用户，2026-10-03）
-> 不做什么：不修改 PR #5（S1 实现，on hold）；不删除任何现有命令；不引入新依赖
+> 不做什么：不删除任何现有命令；不引入新依赖
+> 已落地的前置（2026-10-03，均已合入 `main`）：PR #5（S1，`graph_schema.rs` 契约表与 `--graph-schema`）、PR #8（扫描诊断逐次记录）、PR #9（阶段 1.0）、PR #10（契约表补 `landed` 与 `IndexState` 记录形态）
 
 ## 0. 结论（一页版）
 
@@ -94,8 +95,8 @@
 
 LLM 不能打开源文件复核，所以「缺失」比「错误」更危险。要求：
 
-- 每个被解析失败、未识别、重复、冲突的对象，图里有一个 `Diagnostic` 节点挂在被诊断对象上（PR #4 §3.2）；
-- 解释规则写明：**没有出边 ≠ 没有关系**，除非被查对象上没有 `Diagnostic`；
+- 每个被解析失败、未识别、重复、冲突的对象，图里有一个 `Diagnostic` 节点（PR #4 §3.2）。`Diagnostic` 带 `path`（所属源文件）与 `json_path`，**自己就能按路径查到**；被诊断的对象在图里存在时，另有一条 `HasDiagnostic` 边把它挂上去。**文件级**问题（整个 `.spg` / `.tbl` 解析失败，没有 Page / Model 节点可挂；现状 `parse_failure_diagnostic_entry` 只记路径、`node_id` 为空）只有 `Diagnostic` 节点、没有 `HasDiagnostic` 边：检查一个对象的覆盖情况，要同时看它的 `HasDiagnostic` 边与 `path` 等于它所在文件的 `Diagnostic`。生命周期随源文件的 origin 撤销；
+- 解释规则写明：**没有出边永远不等于没有关系**。`Diagnostic` 只能把「已知的未知」变成可见，**不能**反过来证明「没有诊断就是完整」——解析器还没覆盖的来源（脚本在阶段 5 前、未决定的 `.tpg` / `.mpg`、不支持的表达式形态）不会产生任何诊断。只有 schema 里某个边类型的 `absent_when` 明确写着对某类来源「完整」，并且该来源已经摄入时，才允许把缺失读成否定；
 - 查询期才能算出的诊断（依赖提问上下文的）不入图，规则里标「仅查询期」。
 
 ## 3. 功能逐项判定
@@ -112,7 +113,7 @@ LLM 不能打开源文件复核，所以「缺失」比「错误」更危险。�
 | 优先级判定 `priority.rs`（`defaultValue`/`exp`/`calcCondition`） | **入图** | 静态可确定、规则非平凡：Component 增 `eval_mode`（现有 5 种枚举值）。现在只有单文件模式读它 |
 | 动作类型归类 `action_semantics.rs` | **入图** | Action 增 `action_kind`；未知类型 → `Diagnostic`（承接 `UNKNOWN_ACTION_TYPE`，PR #4 §3.2 已提） |
 | 字段级血缘（`--explain` 的 `lineage`、`query_dataflow`） | **入图** | PR #4 §3.1 `DerivesFrom`；须携带现有的 `confidence` / `transform` / `via_node` / 证据 `json_path`（§1.1）。调研报告同判：已确定性计算、最便宜的首个收益 |
-| 值来源追溯 `dependency.rs`、`value_source_facts` | **入图（直接边）+ 配方（闭包）** | 直接 `DependsOn` 边已在图里；传递闭包交给 GQL 变长路径。循环检测改为节点属性 + `Diagnostic`，不在查询期现算 |
+| 值来源追溯 `dependency.rs`、`value_source_facts` | **入图（直接边 + 字段身份）+ 配方（闭包）** | 直接 `DependsOn` 边已在图里；但 `trace_value_source` 是**按字段**追的：从一个 (组件, 字段) 出发，只沿该字段表达式引用的目标继续，而图里同一组件节点上挂着它所有表达式字段的依赖，`source_field` 只在边的 `meta` 文本里。所以裸 `DependsOn*` 变长路径会混入不相干字段的依赖，**不能**直接当作闭包的替代。闭包要在「每一跳保留字段身份」后才可交给 GQL：把 `source_field` 提成可过滤的边属性（随 schema v2 的扁平边属性，PR #4 §4），或把 (组件, 字段) 建成一等节点；在此之前该项不得列为「可由 GQL 复现」，对等门禁里单列。循环检测改为节点属性 + `Diagnostic`，不在查询期现算 |
 | 可见性门禁链（祖先组件条件 + 择父规则，`component_ancestor_chain`，`explain/condition_facts/conditions.rs:311`） | **配方 + 解释规则** | `Contains` 与条件 owner 边已在图；择父排序（`ancestor_parent_rank`）是**判断规则**，必须写进规则，不能让小模型自己猜 |
 | `availability_facts`（数据源为何可能为空）、writer `conditionExp`（F5/F6） | **入图** | 过滤条件已有 `SourceFilterExp` 条件节点；缺的是过滤字段名（评测中两组都没报出，PR #4 §6 第 1 问待核实）和 writer 条件 |
 | Grafeo 存储、增量、`ownership`、`IndexState` | **保留** | M59 进行中，本文不改 |
@@ -124,13 +125,13 @@ LLM 不能打开源文件复核，所以「缺失」比「错误」更危险。�
 | 功能 | 判定 | 理由 |
 |---|---|---|
 | `--gql`、`--gql-max-rows` | **保留，升为唯一查询入口** | 只读两道闸已验证（`graph_grafeo.rs`）；LLM 自己组合，不需要动词 |
-| `--graph-schema`（PR #4 S1，未合） | **新增，入口 0** | 结构 + 解释规则 + 方言 + 配方的单一真源 |
+| `--graph-schema`（PR #4 S1，已由 PR #5 合入） | **入口 0（已落地）** | 结构 + 解释规则 + 方言 + 配方的单一真源 |
 | `--find` | **配方**（保留 CLI 别名） | 中文路径、`\|` 分隔的 id 文法是小模型第一道坎；保留「名字→规范 id」这一步，但实现收缩为 GQL 配方 + 候选排序（`candidate.rs`），并**回显它执行的 GQL** 让模型学会 |
 | `--explain` / `--relations`（`explain*` 0.72 万、`query*` 0.80 万行） | **冻结 → 退役** | **事实**入图（上表），**叙述**（`what_is_it`、`primary_reason`、`key_findings`）与 envelope 退役，**判断**搬进规则。保留到对等门禁通过，作为差分测试的基准 |
 | 10 个已隐藏的旧动词（`--explain-condition`、`--context`、`--query-model/page/cross/dataflow/page-logic`、`--find-page/model/component`） | **退役** | 已从 `--help` 隐藏、SKILL 已写「新集成不要用」；删除前核对哪些快照测试还依赖它们 |
 | `--advise-query`、`--question-kind`、`--intent`、`--budget`、`route.rs`（0.09 万）、`answer_contract.rs`（0.09 万） | **退役** | 纯动词协议产物（§2.2）；`--budget` 的唯一对应物是 `--gql-max-rows` |
-| `path.rs`（路径候选与排序）、`dense_graph.rs`（CSR）、`graph_retrieval.rs`（PPR spike） | **冻结 → 退役** | 为叙述挑「主链路」而存在；引擎自带路径遍历。**连带**：账本里的 M59-PATH（`same_page` 判定缺陷）随之作废，不再修——这是需要用户确认的取舍（§7 Q5） |
-| `page_logic`（`query/page_logic*` 约 0.4 万行，页面动作流） | **入图 + 配方** | 动作流是 Page→Component→Action→Model 的多跳路径，GQL 可表达；沿用其 `PRIMARY_PATH_LIMIT` 的教训：配方必须自带 `LIMIT`，否则大页面撑爆结果 |
+| `path.rs`（路径候选与排序）、`dense_graph.rs`（CSR）、`graph_retrieval.rs`（PPR spike） | **冻结 → 退役** | 为叙述挑「主链路」而存在；引擎自带路径遍历。**连带**：账本里的 M59-PATH（`same_page` 与物理字段识别缺陷）随之作废，不再修——这是需要用户确认的取舍（§7 Q5）。**因此** `path.rs` 产出的这两类判定**不得当作对等门禁的基准**：阶段 1/2 的差分与对照里，这些字段不做「与旧输出逐项相等」，改为对照人工核对过的、以源文件为准的金标准，旧输出与新配方各自与金标准比 |
+| `page_logic`（`query/page_logic*` 约 0.4 万行，页面动作流） | **入图 + 配方** | 动作流是 Page→Component→Action→Model 的多跳路径，GQL 可表达；沿用其 `PRIMARY_PATH_LIMIT` 的教训：配方必须限量，否则大页面撑爆结果。**但限量不能静默**：`--gql` 的 `truncated` 是按引擎已返回的行数算的（`graph_grafeo.rs` 的 `query_gql_read_only`），配方里写死的 `LIMIT n` 会让它恒为 `false`，而 `PRIMARY_PATHS_TRUNCATED` 又随动词退役。所以配方约定：查询写 `LIMIT n+1`，配方说明里写明「返回 n+1 行即表示有遗漏」，并在 `--graph-schema` 的配方条目里带出 `limit` 参数；需要总数时用配套的计数查询。没有这个标记的限量配方不得放行 |
 | 单文件模式（`FILE`、`--query`、`--priority`、`--detail`、`--human` REPL、`--interactive`） | **冻结 → 终态改为「临时建图 + GQL」** | 它让 LLM 直接读 JSON 大对象，正是目标要避免的路径；保留给开发调试 |
 | JSON 响应信封（`summary`/`details`/`evidence`/`diagnostics`） | **退役**（动词随之） | GQL 自有 `{columns, rows, truncated}`；`--human` 的 TSV 保留 |
 | 评测 harness（M58 kimi / ai-eval，`tests/ai_eval_tests.rs`） | **保留并升格为门禁** | 阶段 2 的对等判据就是它；需新增「GQL 臂」 |
@@ -158,14 +159,13 @@ LLM 不能打开源文件复核，所以「缺失」比「错误」更危险。�
 
 终极目标下最大的缺口：后端 Nashorn 脚本做第三方请求、入库、数据流逻辑，前端 `.ts` 改页面参数与 superPage 内容，
 这些**根本不在图里**，LLM 不读源文件就答不了。方向沿用调研报告
-（`/mnt/project-files/graph-extraction-research/report.md`）与 PR #5 spec §6，不重做：
+（`/mnt/project-files/graph-extraction-research/report.md`）与[图 Schema 契约设计](2026-10-02-graph-schema-contract-design.md) §6（尤其 §6.4「提交与校验：不经 GQL 写」：提案载荷、校验步骤、`script_hash` 与逐字子串核对、幂等键），不重做：
 
 - **层 1 确定性解析（Rust，候选 oxc）**：`origin=parser`，带文件、行区间、脚本 hash。字面量参数（URL、表名、参数键、组件 id、字段名）可确定地成边；
-- **层 2 LLM 补残余**：只做语法判不了的，走 §6 的校验提交命令（**不走 GQL 写入**），要求 `origin=llm`、置信度、行区间 + 引用片段并由校验器核对；层 1 能推出的不接受 LLM 提交；
+- **层 2 LLM 补残余**：只做语法判不了的，走[契约设计 §6.4](2026-10-02-graph-schema-contract-design.md) 的校验提交命令（**不走 GQL 写入**；该协议在那份文档里定义，尚无实现，由阶段 5 的 S3 落地），要求 `origin=llm`、置信度、行区间 + 引用片段并由校验器核对；层 1 能推出的不接受 LLM 提交；
 - **前置**：~~额外仓库同步到 GitHub~~（已完成，`wu2305/autocrm`）；oxc 体积实测（AGENTS.md 要求）；一次只计数的 spike——所有调用参数里字符串字面量对计算值的比例，这个数字决定层 2 要多大；**脚本层的关注点（用户，2026-10-03）**：用户关心的是**数据处理逻辑与数据库操作逻辑**，凭据不是设计驱动力——平台没有密钥库，约 30 个脚本里的硬编码凭据「几乎无法避免」。因此层 1/层 2 只抽取能成边或成事实的内容（读写哪张表、哪些字段、什么操作、数据怎么加工、调哪个外部地址/脚本），**不把脚本原文或无关的字符串字面量存进图**；这样凭据不需要专门的脱敏规则就不会入图（见到过的硬编码凭据取值不得写进任何文档）；
 - **在此之前确定的事（2026-10-03 按真实语料更正）**：先前写的「workflow 节点按路径指向 `action.ts`」**不成立**：`.wfl` 文件（3 个）不含任何脚本链接，且用户说明 `.wfl` 无需解析。语料里实际存在的链接形态是：`.tbl` 数据流的 `Script` 节点按**裸 hash id**（无路径、无后缀）指向脚本；`.spg` 的 `webAPI.url` 按路径指向 `.action.ts`（221 个 `webAPI` 动作）；脚本之间用 `import` 路径；`.spg` 的 `script` 动作按（页面键、函数名）指向 `custom.ts` 的 `CustomActions` 函数。这些都是确定性可解析的，所以**脚本节点与「节点→脚本」边**仍可先于任何解析落地。`X.action` 是 `X.action.ts` 的编译副本，应视为同一节点的构建产物，不单独建节点。
 
-PR #5 保持 on hold，本文不推进它。
 
 ## 4. 目标形态
 
@@ -204,14 +204,14 @@ stdio / MCP 的工具表同构：`graph_schema`、`gql`、`status`、`diff_refre
 |---|---|---|
 | **0 批准** | 批准本文 + PR #4；回答 §7 的问题 | 用户批准（draft → approved） |
 | **1.0 语料阻塞缺陷**（先于 1 的其余条目；独立于 schema 决策） | ⓐ 空 `dbTableName`（语料中 38 / 828 张表，均为 dataFlow）使 `--build-graph` 整体中止（`node id has an empty kind/page/local segment: model`）。用户确认这是**未落表数据流**（即时取数的逻辑，没有物理输出表），不是错误：模型照常入图并带 `landed: false`，不建输出边，不报诊断；ⓑ 路径前缀解析：`$TAPP:`（当前应用根）、`$APP:`、`$ANA:`、绝对路径 `/xiaoshouyi/...`、`..` 归一，**绝不为非 `.spg` 目标创建 Page 节点**——现状 636 个 Page 节点中有 42 个磁盘上不存在（含 18 个路径里嵌着原样 `$APP:/`），其上还挂着字段；解析不了的引用记 `SCANNER_UNRESOLVED_REFERENCE`（入图为 `Diagnostic` 属阶段 1 ⑧）。**已由 PR #9 实现**；剩余缺口：解析正确但目标文件不存在的页面引用（autocrm 上 7 个）仍会留下无文件的 Page 节点，判定需要文件集合；另有 17 张数据流缺省 `dbTableName` 键，语义未确认 | 在 autocrm 上建图成功且 `Page` 节点无幽灵（每个 Page 对应磁盘文件）；夹具上现有快照不变。「这个引用能解析吗」目前图答不了，而这是终极目标直接要的 |
-| **1 图补全** | ① S1 `graph_schema.rs`（**PR #5，on hold，等用户放行**）→ S2 写入校验；② S3 血缘边 + schema 版本键；③ S4 诊断入图；④ 新增 S3b：`eval_mode`、`action_kind`、循环标记；⑤ 并行：F3 嵌套表达式；⑥ 核实并补过滤字段名（PR #4 §6.1）；⑦ 血缘边在现有 `confidence`/`transform` 之外借用 OpenLineage 的 `DIRECT`/`INDIRECT` 作为 `lineage_kind` 取值（值域待实现时核对现有 `transform` 文本）；⑧ 摄入时汇总「见过但未映射」的 JSON 键（现有 `SCANNER_UNRECOGNIZED_CONTAINER_KEY` 只覆盖容器键），作为 `Diagnostic` 挂在所属文件/页面上，让图能说明自己漏了什么（调研报告 Part 2；Backstage 同样把未解析引用记为状态而非丢弃）；⑨ 前置改动（已核对源码）：扫描期诊断目前只存**计数 + 每类一个样例位置**（`scanner/spg.rs:175` 起的 `ScanDiagnostics`），要把诊断挂到具体节点，必须先改为**逐次出现一条记录**；`UNKNOWN_ACTION_TYPE` 目前在查询期算出，入图意味着导入期计算（可复算性待实现时核实）；`explain/importance.rs` 的 `classify_importance` 看起来可在导入期算出并成为节点属性，**此为推断，未核实**；⑩ 语料暴露的廉价高价值边（均来自已解析的文件，见盘点 §7）：`dimensionPath` → 字段到表的边（盘点数 26,994，与本线程原始字符串匹配 32,231 不一致，**未对账**，实现前先对账）、`properties.depends` 指向真实 model 节点、`webAPI.url`（含 `?method=`）与 `scriptFunction` 作为 Action 节点属性、`shortUrls` 作为页面别名 | 夹具上，`--explain` 每个 fact block 都能由 GQL 得出相同事实（差分测试，不降低断言）；增量与全量产物仍逐属性相等（B5 套件） |
+| **1 图补全** | ① S1 `graph_schema.rs`（**PR #5，已合入**）→ S2 写入校验；② S3 血缘边 + schema 版本键；③ S4 诊断入图；④ 新增 S3b：`eval_mode`、`action_kind`、循环标记；⑤ 并行：F3 嵌套表达式；⑥ 核实并补过滤字段名（PR #4 §6.1）；⑦ 血缘边在现有 `confidence`/`transform` 之外借用 OpenLineage 的 `DIRECT`/`INDIRECT` 作为 `lineage_kind` 取值（值域待实现时核对现有 `transform` 文本）；⑧ 摄入时汇总「见过但未映射」的 JSON 键（现有 `SCANNER_UNRECOGNIZED_CONTAINER_KEY` 只覆盖容器键），作为 `Diagnostic` 挂在所属文件/页面上，让图能说明自己漏了什么（调研报告 Part 2；Backstage 同样把未解析引用记为状态而非丢弃）；⑨ 前置改动（已核对源码）：扫描期诊断目前只存**计数 + 每类一个样例位置**（`scanner/spg.rs:175` 起的 `ScanDiagnostics`），要把诊断挂到具体节点，必须先改为**逐次出现一条记录**（已由 PR #8 合入，记录存在 `IndexState` 的 `scanner_entry:<path>` 里，契约表已描述其形态）；`UNKNOWN_ACTION_TYPE` 目前在查询期算出，入图意味着导入期计算（可复算性待实现时核实）；`explain/importance.rs` 的 `classify_importance` 看起来可在导入期算出并成为节点属性，**此为推断，未核实**；⑩ 语料暴露的廉价高价值边（均来自已解析的文件，见盘点 §7）：`dimensionPath` → 字段到表的边（盘点数 26,994，与本线程原始字符串匹配 32,231 不一致，**未对账**，实现前先对账）、`properties.depends` 指向真实 model 节点、`webAPI.url`（含 `?method=`）与 `scriptFunction` 作为 Action 节点属性、`shortUrls` 作为页面别名 | 夹具上，`--explain` 每个 fact block 都能由 GQL 得出相同事实（差分测试，不降低断言）；**例外两处，各有替代判据**：值来源闭包在「每一跳保留字段身份」落地前不计入可复现项（§3.1），`same_page` 与物理字段识别按金标准而非旧输出判（§3.2）。增量与全量产物仍逐属性相等（B5 套件） |
 | **2 配方与评测** | 配方数据文件；`--graph-schema` 输出配方；评测加 GQL 臂；S5 复跑 | **同模型同题**三臂（旧动词 / GQL+help / GQL+schema+配方+规则）；独立评分；多次运行；含真实语料一轮。阈值由用户定（§7 Q7） |
 | **3 表面切换** | stdio 工具表重塑；SKILL.md 重写；旧动词发 deprecated 诊断；（可选）MCP 薄适配 | 用户批准工具表面变化（M58 曾固定它） |
 | **4 退役** | 冻结项分批删除；redb（M59-5）；单文件模式去留 | 每批：影响面测试 + 全量；PR 里记录行数与二进制体积的变化 |
-| **5 脚本**（独立线，只依赖 schema） | 脚本节点 + 节点→脚本边 → oxc 计数 spike → 层 1 → 层 2（经 §6 校验提交） | 额外仓库同步 + PR #5 放行；每步先在真实脚本上计数再设计 |
+| **5 脚本**（独立线，只依赖 schema） | 脚本文件进入摄入管线（新增源文件类型、文件发现、解析结果与账本、删除与增量，见计划 S1a）→ 脚本节点 + 节点→脚本边 → oxc 计数 spike → 层 1 → 层 2（经契约设计 §6.4 的校验提交） | 额外仓库同步（已完成）+ S1 登记表（已合入）；每步先在真实脚本上计数再设计 |
 
-顺序理由：阶段 1 最便宜，且是后面所有阶段的前提；阶段 5 的数据尚未到位，所以单列、不阻塞 1–4。
-阶段 1 的 ① 在 PR #5 放行前不动，**其余条目不依赖它**，可以先做。
+顺序理由：阶段 1 最便宜，且是后面所有阶段的前提；脚本数据已到位（`wu2305/autocrm`），阶段 5 单列只因它是独立的一条线、不阻塞 1–4，实际前置是 schema（已合入）、本文与计划的批准、以及 S0 的 oxc 体积与解析 spike。
+阶段 1 的 ① S1 已合入（PR #5）；新增节点或边类型的 PR 仍然一次只放一个（计划 §4 冲突规则）。
 
 ## 7. 开放问题（括号内为推荐）
 
@@ -220,7 +220,7 @@ stdio / MCP 的工具表同构：`graph_schema`、`gql`、`status`、`diff_refre
 2. **派生事实放哪**：导入期入图，还是 `CALL` 式按需过程？（导入期，只物化直接事实；闭包交给 GQL）
 3. **stdio 工具表**：是否同意加入 `gql` / `graph_schema` 并最终收缩到四个工具？MCP 是否先不做？（同意；MCP 等契约稳定）
 4. **脚本**：层 1 用 oxc（待体积实测）+ 层 2 走 §6 校验提交，接受吗？（接受，先做字面量占比 spike；数据已不再阻塞）
-5. **M59-PATH**：随 `path.rs` 退役而作废，不再修，接受吗？（接受；若你想先保留旧动词更久，则保持排队）
+5. **M59-PATH**：随 `path.rs` 退役而作废、不再修，同时 `same_page` 与物理字段识别从对等基准里剔除、改按金标准判（§3.2），接受吗？（接受；若你想先保留旧动词更久，则保持排队，并仍按金标准而不是旧输出做对照）
 6. **单文件模式**：终态改为「临时建图 + GQL」，还是保留 JSON 输出给开发调试？（临时建图；JSON 输出冻结）
 7. **成功判据**：阶段 2 的通过线用什么数？（GQL+schema+配方+规则臂在同模型同题上不低于旧动词臂，且 `forbidden_claims` 违规数为 0；具体百分比请你定）
 8. **脚本里的凭据**：**已决（2026-10-03 用户）**：不是设计驱动力，关注点是数据处理与数据库操作逻辑；抽取范围按 §3.5 收窄，不另设脱敏规则。
