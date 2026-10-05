@@ -199,6 +199,124 @@ fn scan_fails_when_an_edge_endpoint_combination_is_not_registered() {
     }
 }
 
+// ------------------------------------------------------------ id 文法
+
+/// 每个 id 家族带空段（或段数不对）的 id 都被拒：前缀合法不够，还要符合 `id_formats`。
+/// 缺 id 的组件 / 动作会拼出 `comp:page.spg|` 这类 id，并让多个缺 id 的元素塌成同一个节点。
+#[test]
+fn node_ids_with_an_empty_or_miscounted_segment_are_rejected() {
+    let bad_ids = [
+        (NodeType::Page, "page:"),
+        (NodeType::Component, "comp:app/a.spg|"),
+        (NodeType::Component, "comp:|btn"),
+        (NodeType::Component, "comp:app/a.spg"),
+        (NodeType::Component, "comp:app/a.spg|btn|extra"),
+        (NodeType::Action, "action:app/a.spg|btn|"),
+        (NodeType::Action, "action:app/a.spg||a1"),
+        (NodeType::Action, "action:|btn|a1"),
+        (NodeType::Action, "action:app/a.spg|btn"),
+        (NodeType::Model, "model:"),
+        (NodeType::Model, "model:app/a.spg|"),
+        (NodeType::Model, "model:|m"),
+        (NodeType::Model, "model:a|b|c"),
+        (NodeType::Field, "field:"),
+        (NodeType::Field, "field:|m.f"),
+        (NodeType::Field, "field:app/a.spg|"),
+        (NodeType::Field, "param:app/a.spg|"),
+        (NodeType::Field, "param:|name"),
+        (NodeType::Field, "user:"),
+        (NodeType::Field, "system:"),
+        (NodeType::Condition, "cond:app/a.spg|"),
+        (NodeType::Condition, "cond:app/a.spg|btn#exp"),
+        (NodeType::Condition, "cond:app/a.spg|#exp#0"),
+        (NodeType::Condition, "cond:app/a.spg|btn##0"),
+        (NodeType::Condition, "cond:app/a.spg|btn#exp#0#x#y"),
+    ];
+    for (node_type, id) in bad_ids {
+        let violations = graph_schema::node_violations(
+            graph_schema::schema(),
+            &node(id, node_type.clone(), None),
+            true,
+        );
+        assert_eq!(
+            violations
+                .iter()
+                .any(|v| v.contains("id 不符合契约文法") && v.contains(id)),
+            true,
+            "{id} 应因 id 文法被拒：{violations:?}"
+        );
+    }
+}
+
+/// 合规 id（各家族的全部登记形态）不被文法检查误拒。
+#[test]
+fn well_formed_node_ids_pass_the_grammar_check() {
+    let good_ids = [
+        (NodeType::Page, "page:app/a.spg"),
+        (NodeType::Component, "comp:app/a.spg|btn"),
+        (NodeType::Action, "action:app/a.spg|btn|a1"),
+        (NodeType::Model, "model:orders"),
+        (NodeType::Model, "model:app/a.spg|flow1"),
+        (NodeType::Field, "field:orders.total"),
+        (NodeType::Field, "field:orders.*"),
+        (NodeType::Field, "field:app/a.spg|flow1.x"),
+        (NodeType::Field, "param:app/a.spg|p1"),
+        (NodeType::Field, "param:page/p1"),
+        (NodeType::Field, "user:project.name"),
+        (NodeType::Field, "system:time"),
+        (NodeType::Condition, "cond:app/a.spg|btn#exp#0"),
+        (NodeType::Condition, "cond:app/a.spg|btn#a1#conditionExp"),
+        (NodeType::Condition, "cond:app/a.spg|flow1#filter#0#exp"),
+    ];
+    for (node_type, id) in good_ids {
+        let violations =
+            graph_schema::node_violations(graph_schema::schema(), &node(id, node_type, None), true);
+        assert_eq!(
+            violations.iter().any(|v| v.contains("id 不符合契约文法")),
+            false,
+            "{id} 不该被文法检查拒绝：{violations:?}"
+        );
+    }
+}
+
+/// 整条扫描路径：SPG 里省略动作 id（解析时默认空串）会拼出 `action:page|comp|`，扫描必须报错，
+/// 错误点明文件、节点 id 与「含空段」，而不是写出这个 id 并让同一组件下缺 id 的动作塌成一个节点。
+#[test]
+fn scan_rejects_an_action_without_an_id() {
+    let page = serde_json::json!({
+        "version": "1", "params": [], "sources": [],
+        "canvas": {"id": "canvas", "type": "canvas", "components": [
+            {"id": "btn", "type": "button", "actions": [{"type": "showComponent", "target": "x"}]}
+        ]}
+    });
+    let mut store = MemoryGraphStore::new();
+    let error = process_spg_file_from_value(&mut store, PAGE, page)
+        .expect_err("缺 id 的动作必须让扫描报错");
+    let message = chain(&error);
+    for expected in [PAGE, "action:app/a.spg|btn|", "id 不符合契约文法", "含空段"] {
+        assert_eq!(
+            message.contains(expected),
+            true,
+            "缺少 {expected}：{message}"
+        );
+    }
+}
+
+/// 缺 id 的组件不会走到写入口：`superpage` 解析阶段就跳过它（子组件上提给父级），所以扫描
+/// 产不出 `comp:page|`；这里钉住该行为，免得上游改了之后空段 id 悄悄进图（即便进了，
+/// 写入校验也会拒收，见 `node_ids_with_an_empty_or_miscounted_segment_are_rejected`）。
+#[test]
+fn scan_never_emits_a_component_node_without_an_id() {
+    let page = serde_json::json!({
+        "version": "1", "params": [], "sources": [],
+        "canvas": {"id": "canvas", "type": "canvas", "components": [{"type": "button"}]}
+    });
+    let mut store = MemoryGraphStore::new();
+    let ids =
+        process_spg_file_from_value(&mut store, PAGE, page).expect("缺 id 的组件被解析阶段跳过");
+    assert_eq!(ids.iter().any(|id| id.ends_with('|')), false, "{ids:?}");
+}
+
 // ------------------------------------------------------------ (b) 缺必需 meta
 
 /// 生产契约表：Action 的 `triggerType` / `condition` / `conditionExp` / `waitPrev` 都是
@@ -249,13 +367,17 @@ fn write_without_meta_is_accepted_only_for_an_existing_node() {
     let mut store = MemoryGraphStore::new();
     let mut guard = SchemaGuard::new(&mut store, PAGE);
     guard
-        .upsert_node(node("action:a", NodeType::Action, None))
+        .upsert_node(node("action:app/a.spg|btn|a1", NodeType::Action, None))
         .expect_err("新 Action 节点没有 meta：缺必需键");
     guard
-        .upsert_node(node("action:a", NodeType::Action, Some(full_meta)))
+        .upsert_node(node(
+            "action:app/a.spg|btn|a1",
+            NodeType::Action,
+            Some(full_meta),
+        ))
         .expect("带齐必需键");
     guard
-        .upsert_node(node("action:a", NodeType::Action, None))
+        .upsert_node(node("action:app/a.spg|btn|a1", NodeType::Action, None))
         .expect("已存在的节点，无 meta 写入沿用既有 meta");
 }
 
@@ -267,7 +389,7 @@ fn node_meta_with_wrong_value_type_is_rejected() {
     let message = violation_message(
         guard
             .upsert_node(node(
-                "action:a",
+                "action:app/a.spg|btn|a1",
                 NodeType::Action,
                 Some(serde_json::json!({
                     "triggerType": null, "condition": null, "conditionExp": null, "waitPrev": null

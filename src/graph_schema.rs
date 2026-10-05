@@ -1395,6 +1395,13 @@ pub fn node_violations(schema: &GraphSchema, node: &Node, inherits_meta: bool) -
             variant_name(&node.node_type),
             node.id
         ));
+    } else if let Some(problem) = crate::graph_identity::id_shape_problem(&node.id) {
+        // 前缀对了再核文法：缺 id 的组件会拼出 `comp:page.spg|`，前缀合法但违反 id_formats
+        violations.push(format!(
+            "{} 节点的 id 不符合契约文法（{problem}）：{}",
+            variant_name(&node.node_type),
+            node.id
+        ));
     }
     violations.extend(meta_shape_violations(
         &owner,

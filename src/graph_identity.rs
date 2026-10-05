@@ -253,6 +253,46 @@ pub fn parse_node_id(id: &str) -> Option<ParsedNodeId> {
     }
 }
 
+/// 写入校验用的完整 id 文法检查：id 形如 `<kind>:<段>[|<段>…]`，返回 `None` 表示合规，
+/// 否则返回问题的稳定描述（合规路径不分配）。
+///
+/// 与上面的构造 / 解析函数同一份约定（竖线分隔作用域、各段非空），再按 kind 补上各自要求的
+/// 段数：`page` / `user` / `system` 无竖线；`comp` / `cond` 恰好 `<页面>|<局部名>` 两段；
+/// `action` 恰好 `<页面>|<组件>|<动作>` 三段；`model` / `field` / `param` 是全局名（一段）或页面
+/// 局部名（两段）。`cond` 的局部名再按 `#` 切分，同样不得有空段。任何一段为空——例如
+/// SPG 里缺 id 的组件或动作拼出的 `comp:page.spg|`——都不合规：空段会让多个缺 id 的元素塌成同一个节点。
+pub fn id_shape_problem(id: &str) -> Option<&'static str> {
+    let Some((kind, rest)) = id.split_once(':') else {
+        return Some("缺少 kind 前缀");
+    };
+    if rest.split('|').any(str::is_empty) {
+        return Some("含空段（kind 之后、`|` 两侧都不得为空）");
+    }
+    let pipes = rest.bytes().filter(|byte| *byte == b'|').count();
+    match kind {
+        "page" | "user" | "system" if pipes != 0 => Some("该类型的 id 不应含 `|`"),
+        "comp" if pipes != 1 => Some("应为 `<页面>|<组件 id>` 两段"),
+        "action" if pipes != 2 => Some("应为 `<页面>|<组件 id>|<动作 id>` 三段"),
+        "cond" if pipes != 1 => Some("应为 `<页面>|<条件局部名>` 两段"),
+        "cond" => {
+            // 条件局部名形如 `<属主>#<属性或动作>#<序号|conditionExp|condition>`，
+            // 或 `<source>#filter#<n>#exp|clause`：3 或 4 段，各段非空
+            let local = rest.split_once('|').map_or("", |(_, local)| local);
+            let parts = local.split('#').count();
+            if local.split('#').any(str::is_empty) || !(3..=4).contains(&parts) {
+                Some("条件局部名应为 3 或 4 个非空的 `#` 段")
+            } else {
+                None
+            }
+        }
+        "model" | "field" | "param" if pipes > 1 => {
+            Some("至多一个 `|`（全局名或 `<页面>|<局部名>`）")
+        }
+        "page" | "user" | "system" | "comp" | "action" | "model" | "field" | "param" => None,
+        _ => Some("未知的 kind 前缀"),
+    }
+}
+
 /// A1：判断 id 是否页面局部节点（kind 前缀后带 `|`）。
 pub fn is_page_scoped_id(id: &str) -> bool {
     parse_node_id(id).is_some_and(|parsed| parsed.page.is_some())
