@@ -440,11 +440,18 @@ fn extract_components(
         properties: HashMap::new(),
         actions: Vec::new(),
         submit_data: raw.submit_data,
+        // resPath 是 referenceResources 的下标。字符串与整数照常取值；其它形态（布尔、浮点、
+        // 对象、超出 i64 的整数）保留其 JSON 文本，让扫描诊断能指出「这里有个不合法的下标」，
+        // 而不是把它当成没有引用。
         res_path: raw.res_path.as_ref().and_then(|v| {
             if let Some(s) = v.as_str() {
                 Some(s.to_string())
+            } else if let Some(n) = v.as_i64() {
+                Some(n.to_string())
+            } else if v.is_null() {
+                None
             } else {
-                v.as_i64().map(|n| n.to_string())
+                Some(v.to_string())
             }
         }),
     };
@@ -616,11 +623,17 @@ fn extract_components(
                 })
                 .collect(),
             submit_component: a.submit_component.clone(),
+            // link(app) 动作的 path 是 referenceResources 的下标：不合法的形态保留 JSON 文本供
+            // 扫描诊断指出；其它动作的 path 维持原行为（只认字符串与 i64）。
             path: a.path.as_ref().and_then(|v| {
                 if let Some(s) = v.as_str() {
                     Some(s.to_string())
+                } else if let Some(n) = v.as_i64() {
+                    Some(n.to_string())
+                } else if a.action_type == "link" && a.target_type == "app" && !v.is_null() {
+                    Some(v.to_string())
                 } else {
-                    v.as_i64().map(|n| n.to_string())
+                    None
                 }
             }),
             short_url: a.short_url.clone(),

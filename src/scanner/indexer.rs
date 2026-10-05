@@ -37,6 +37,21 @@ pub struct IndexPlan {
 }
 
 /// 已解析待写图更新项
+/// 扫描语义版本：同一份源文件内容会被扫成不同的图/诊断时必须递增。
+///
+/// 增量扫描只比较文件指纹，内容没变就跳过解析；若规则变了而指纹不变，升级后的旧图
+/// 会一直保留旧规则的结果。把版本折进指纹，升级后每个文件第一次扫描都判为脏、
+/// 按新规则重建一次。
+/// - 2：跨页引用按前缀解析且不造幽灵 Page；空 `dbTableName` 不再中止（`landed: false`）。
+const SCANNER_SEMANTICS_VERSION: u32 = 2;
+
+/// 文件内容指纹：`s<扫描语义版本>-<内容 xxhash>`，见 [`SCANNER_SEMANTICS_VERSION`]。
+fn content_fingerprint(content_bytes: &[u8]) -> String {
+    let mut hasher = XxHash64::default();
+    hasher.write(content_bytes);
+    format!("s{SCANNER_SEMANTICS_VERSION}-{:x}", hasher.finish())
+}
+
 #[derive(Debug)]
 pub struct ParsedGraphUpdate {
     /// 逻辑路径（相对项目路径）
@@ -273,6 +288,15 @@ pub struct ParseFailure {
     pub reason: String,
 }
 
+/// 逐次扫描诊断的合并结果，见 [`ProjectIndexer::merge_scanner_occurrence_entries`]。
+#[derive(Debug, Default, Clone)]
+pub struct ScannerOccurrenceReport {
+    /// 全库逐次记录（路径字典序、文件内出现顺序）
+    pub occurrences: Vec<crate::scanner::ScanOccurrence>,
+    /// 只有计数、没有逐次记录的文件（旧版本写入；重新解析后补齐）
+    pub legacy_files: Vec<String>,
+}
+
 /// 单文件扫描诊断计数的持久化镜像（M58.3 PR1 refix，F2）。
 ///
 /// `ScanDiagnostics` 定义在 `scanner::spg`（只读模块边界，不加 serde derive），
@@ -287,23 +311,47 @@ struct FileScanDiagnostics {
     parse_failed: usize,
     sample_unrecognized_location: Option<crate::output::Location>,
     sample_duplicate_location: Option<crate::output::Location>,
+    /// 旧库 entry 没有以下两个字段，`#[serde(default)]` 读作 0 / None。
+    #[serde(default)]
+    unresolved_reference: usize,
+    #[serde(default)]
+    sample_unresolved_reference_location: Option<crate::output::Location>,
     #[serde(default)]
     sample_parse_failed_location: Option<crate::output::Location>,
     #[serde(default)]
     parse_failed_reason: Option<String>,
+    /// 逐次出现的记录。旧库 entry 没有这个字段（`#[serde(default)]` → 空），
+    /// 此时计数大于记录数，见 [`FileScanDiagnostics::lacks_occurrences`]。
+    #[serde(default)]
+    occurrences: Vec<crate::scanner::ScanOccurrence>,
 }
 
 impl FileScanDiagnostics {
+    /// 旧版本写入的 entry：有计数却没有逐次记录。聚合信封仍可用，
+    /// 但不能据此把诊断挂到具体节点；重新解析该文件后才会补齐。
+    fn lacks_occurrences(&self) -> bool {
+        self.unrecognized_container_key
+            + self.duplicate_component_id
+            + self.parse_failed
+            + self.unresolved_reference
+            > self.occurrences.len()
+    }
+
     /// 从 spg 侧计数结构拷贝为可序列化镜像。
     fn from_scan(counts: &crate::scanner::spg::ScanDiagnostics) -> Self {
         Self {
             unrecognized_container_key: counts.unrecognized_container_key,
             duplicate_component_id: counts.duplicate_component_id,
             parse_failed: counts.parse_failed,
+            unresolved_reference: counts.unresolved_reference,
+            sample_unresolved_reference_location: counts
+                .sample_unresolved_reference_location
+                .clone(),
             sample_unrecognized_location: counts.sample_unrecognized_location.clone(),
             sample_duplicate_location: counts.sample_duplicate_location.clone(),
             sample_parse_failed_location: counts.sample_parse_failed_location.clone(),
             parse_failed_reason: counts.parse_failed_reason.clone(),
+            occurrences: counts.occurrences.clone(),
         }
     }
 
@@ -313,10 +361,14 @@ impl FileScanDiagnostics {
             unrecognized_container_key: self.unrecognized_container_key,
             duplicate_component_id: self.duplicate_component_id,
             parse_failed: self.parse_failed,
+            unresolved_reference: self.unresolved_reference,
+            sample_unresolved_reference_location: self.sample_unresolved_reference_location,
             sample_unrecognized_location: self.sample_unrecognized_location,
             sample_duplicate_location: self.sample_duplicate_location,
             sample_parse_failed_location: self.sample_parse_failed_location,
             parse_failed_reason: self.parse_failed_reason,
+            occurrences: self.occurrences,
+            ..Default::default()
         }
     }
 }
@@ -341,6 +393,15 @@ fn per_file_scan_diagnostic_entry(update: &ParsedGraphUpdate) -> Result<Option<(
             if let Some(loc) = counts.sample_duplicate_location.as_mut() {
                 loc.source_file = Some(update.logical_path.clone());
             }
+            for occurrence in &mut counts.occurrences {
+                occurrence.location.source_file = Some(update.logical_path.clone());
+            }
+            // 跨页引用解析失败：位置已带 source_file，无需回填
+            crate::scanner::spg::scan_page_reference_failures(
+                value,
+                &update.logical_path,
+                &mut counts,
+            )?;
             counts
         }
         ParsedGraphContent::Tbl(_) => crate::scanner::spg::ScanDiagnostics::default(),
@@ -361,16 +422,8 @@ fn per_file_scan_diagnostic_entry(update: &ParsedGraphUpdate) -> Result<Option<(
 /// 「按 logical_path 覆盖」语义——所以下一轮解析成功时上面那个函数写的全零 entry
 /// 会自动把这条抹掉，不需要额外的清理路径。
 fn parse_failure_diagnostic_entry(failure: &ParseFailure) -> Result<(String, Vec<u8>)> {
-    let counts = crate::scanner::spg::ScanDiagnostics {
-        parse_failed: 1,
-        sample_parse_failed_location: Some(crate::output::Location {
-            source_file: Some(failure.logical_path.clone()),
-            node_id: None,
-            json_path: None,
-        }),
-        parse_failed_reason: Some(format!("{}: {}", failure.logical_path, failure.reason)),
-        ..Default::default()
-    };
+    let counts =
+        crate::scanner::spg::ScanDiagnostics::parse_failure(&failure.logical_path, &failure.reason);
     let bytes =
         serde_json::to_vec(&FileScanDiagnostics::from_scan(&counts)).with_context(|| {
             format!(
@@ -616,9 +669,7 @@ impl ProjectIndexer {
             current_paths.insert(rel.clone(), path.clone());
 
             let content_bytes = provider.read_bytes(path)?;
-            let mut hasher = XxHash64::default();
-            hasher.write(&content_bytes);
-            let file_hash = format!("{:x}", hasher.finish());
+            let file_hash = content_fingerprint(&content_bytes);
 
             discovered_count += 1;
 
@@ -684,9 +735,7 @@ impl ProjectIndexer {
             };
 
             let (file_hash, mtime, size) = {
-                let mut hasher = XxHash64::default();
-                hasher.write(&content_bytes);
-                let hash = format!("{:x}", hasher.finish());
+                let hash = content_fingerprint(&content_bytes);
 
                 let metadata = provider.metadata(path)?;
                 let mtime = metadata
@@ -867,6 +916,29 @@ impl ProjectIndexer {
             acc.merge(&file_counts.into_scan());
         }
         Ok(acc.to_diagnostics())
+    }
+
+    /// 合并 per-file scanner 诊断 entry 的**逐次记录**（不聚合）。
+    ///
+    /// 按文件 logical_path 字典序、文件内按出现顺序，输出确定。聚合信封请用
+    /// [`Self::merge_scanner_diagnostic_entries`]。旧版本写入的 entry 没有逐次记录，
+    /// 其路径列入 `legacy_files` 而不是静默当作「没有诊断」。
+    pub fn merge_scanner_occurrence_entries(
+        entries: &[(String, Vec<u8>)],
+    ) -> Result<ScannerOccurrenceReport> {
+        let mut sorted: Vec<&(String, Vec<u8>)> = entries.iter().collect();
+        sorted.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut report = ScannerOccurrenceReport::default();
+        for (path, bytes) in sorted {
+            let file: FileScanDiagnostics = serde_json::from_slice(bytes).with_context(|| {
+                format!("Failed to decode scanner diagnostics entry for {path}")
+            })?;
+            if file.lacks_occurrences() {
+                report.legacy_files.push(path.clone());
+            }
+            report.occurrences.extend(file.occurrences);
+        }
+        Ok(report)
     }
 
     /// 全量索引并返回扫描诊断（未识别容器键 / 重复组件 id 的跨文件聚合）。

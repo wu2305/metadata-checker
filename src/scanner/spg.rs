@@ -1,4 +1,6 @@
-use super::{add_edge_with_meta, add_identified_node, add_node, resolve_reference_path};
+use super::{
+    ReferenceUnresolved, add_edge_with_meta, add_identified_node, add_node, resolve_reference_path,
+};
 use crate::graph::{EdgeType, NodeType};
 use crate::graph_store::GraphWriteStore;
 use anyhow::{Context, Result};
@@ -147,7 +149,7 @@ fn collect_component_contexts(
 /// 对原始 SPG JSON 采集扫描诊断计数（未识别容器键 / 重复组件 id）。
 #[cfg(any(test, feature = "cli-local"))]
 pub(crate) fn scan_raw_counts(value: &serde_json::Value) -> ScanDiagnostics {
-    let mut diags = ScanDiagnostics::default();
+    let mut diags = ScanDiagnostics::collecting();
     if let Some(canvas) = value.get("canvas") {
         collect_component_contexts_inner_with_context_and_diagnostics(
             canvas,
@@ -161,6 +163,94 @@ pub(crate) fn scan_raw_counts(value: &serde_json::Value) -> ScanDiagnostics {
     diags
 }
 
+/// 对原始 SPG JSON 逐次采集扫描诊断记录；`source_file` 回填为 `logical_path`。
+///
+/// 与 [`scan_raw_diagnostics`] 同一次遍历、同一套规则，只是不聚合。
+#[cfg(any(test, feature = "cli-local"))]
+pub fn scan_raw_occurrences(value: &serde_json::Value, logical_path: &str) -> Vec<ScanOccurrence> {
+    let mut occurrences = scan_raw_counts(value).occurrences;
+    for occurrence in &mut occurrences {
+        occurrence.location.source_file = Some(logical_path.to_string());
+    }
+    occurrences
+}
+
+/// 页面里「引用另一个页面」的位置：`embedsuperpage` 的 `resPath` 与 `link`（app）动作的
+/// `path`，都应是 `referenceResources` 的下标。建边与诊断共用本函数，保证「哪些引用会建边」
+/// 与「哪些引用记诊断」同一口径。返回 `(所属节点 id, 原始下标文本)`，id 为页面局部组件/动作 id；
+/// 下标文本不一定能解析为数字，link 动作还可能没有下标（`None`）——这些同样是一处无法解析的引用，由诊断侧记录。
+fn page_reference_sites(
+    rel_path: &str,
+    meta: &crate::superpage::SuperPageMetadata,
+) -> Vec<(String, Option<String>)> {
+    let page = rel_path.replace('\\', "/");
+    let mut sites = Vec::new();
+    for comp in &meta.components {
+        if comp.component_type == "embedsuperpage" {
+            // 没有 resPath 的内嵌页同样没有目标，不建 EmbedsPage 边，要如实记诊断
+            sites.push((format!("comp:{page}|{}", comp.id), comp.res_path.clone()));
+        }
+        for action in &comp.actions {
+            // link(app) 没有下标（`path` 缺失或为 null）同样是一处没有目标的跳转：
+            // 语料里有未配置完成的 link 动作，图要能说明这里缺了目标。
+            if action.action_type == "link" && action.target_type == "app" {
+                sites.push((
+                    format!("action:{page}|{}|{}", comp.id, action.id),
+                    action.path.clone(),
+                ));
+            }
+        }
+    }
+    sites
+}
+
+/// 对一个页面采集「跨页引用解析不到 `.spg` 页面」的诊断。
+///
+/// 这些引用在建图时被跳过（不建边、不造 Page 节点），这里把每一处如实记下来，
+/// 让图能说明自己缺了什么。`referenceResources` 缺失或为空时仍要走：此时任何下标都越界，
+/// 建图同样会跳过，必须记诊断。
+#[cfg(any(test, feature = "cli-local"))]
+pub(crate) fn scan_page_reference_failures(
+    value: &serde_json::Value,
+    logical_path: &str,
+    diags: &mut ScanDiagnostics,
+) -> Result<()> {
+    let meta = crate::superpage::parse_superpage_from_value(value.clone())
+        .with_context(|| format!("Failed to parse {logical_path} for reference diagnostics"))?;
+    for (node_id, raw_index) in page_reference_sites(logical_path, &meta) {
+        let (json_path, outcome) = match &raw_index {
+            None => (
+                "resPath/path".to_string(),
+                Err(ReferenceUnresolved::MissingIndex),
+            ),
+            Some(text) => match text.parse::<usize>() {
+                Ok(index) => (
+                    format!("referenceResources[{index}]"),
+                    resolve_reference_path(logical_path, index, &meta.reference_resources),
+                ),
+                Err(_) => (
+                    // 下标本身不是数字：位置只能指向持有它的节点
+                    "resPath/path".to_string(),
+                    Err(ReferenceUnresolved::MalformedIndex {
+                        value: text.clone(),
+                    }),
+                ),
+            },
+        };
+        if let Err(reason) = outcome {
+            diags.record_unresolved_reference(
+                crate::output::Location {
+                    source_file: Some(logical_path.to_string()),
+                    node_id: Some(node_id),
+                    json_path: Some(json_path),
+                },
+                reason.to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
 /// 对原始 SPG JSON 采集扫描诊断（未识别容器键 / 重复组件 id）。
 ///
 /// 生产路径由 indexer 按文件采集计数并持久化到 redb（`per_file_scan_diagnostic_entry` /
@@ -168,6 +258,23 @@ pub(crate) fn scan_raw_counts(value: &serde_json::Value) -> ScanDiagnostics {
 #[cfg(any(test, feature = "cli-local"))]
 pub fn scan_raw_diagnostics(value: &serde_json::Value) -> Vec<crate::output::Diagnostic> {
     scan_raw_counts(value).to_diagnostics()
+}
+
+/// 扫描期诊断的一次具体出现（一条记录对应源文件里的一处问题）。
+///
+/// 计数 + 首个样例只够生成聚合信封；要把诊断挂到具体节点（图内 `Diagnostic`
+/// 节点的前置条件），必须逐次保留。`code` 取 `crate::diagnostics::CODE_SCANNER_*`
+/// 的取值，用字符串而非枚举，使旧版本读到新 code 时不会解码失败。
+/// 本类型是纯数据记录，序列化格式随持久化 entry 一起由 indexer 使用。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScanOccurrence {
+    /// `SCANNER_*` 诊断 code
+    pub code: String,
+    /// 出现位置：`source_file`（逻辑路径）、`node_id`（已知时）、`json_path`
+    pub location: crate::output::Location,
+    /// 这一处具体出了什么问题（解析失败时为失败原因原文）
+    #[serde(default)]
+    pub detail: Option<String>,
 }
 
 /// 扫描阶段的轻量诊断计数（PR1 落地，未识别容器键/重复组件 id）。
@@ -179,20 +286,132 @@ pub(crate) struct ScanDiagnostics {
     /// 不由 `scan_raw_counts` 产出——扫描能跑到这里说明已经解析成功了；
     /// 由 indexer 在解析阶段失败时直接构造。
     pub(crate) parse_failed: usize,
+    /// 跨页引用解析不到 `.spg` 页面的次数（只在 `scan_page_reference_failures` 里产出）。
+    pub(crate) unresolved_reference: usize,
     pub(crate) sample_unrecognized_location: Option<crate::output::Location>,
     pub(crate) sample_duplicate_location: Option<crate::output::Location>,
     pub(crate) sample_parse_failed_location: Option<crate::output::Location>,
+    pub(crate) sample_unresolved_reference_location: Option<crate::output::Location>,
     /// 解析失败的原因（serde/UTF-8 报错原文），随诊断 message 透出
     pub(crate) parse_failed_reason: Option<String>,
+    /// 逐次出现的记录。新产出的诊断里，各 code 的记录数恒等于对应计数
+    /// （由 `record_*` 同时维护）；旧库 entry 没有这个字段，反序列化为空。
+    pub(crate) occurrences: Vec<ScanOccurrence>,
+    /// 是否构造逐次记录。只要组件上下文的遍历（`collect_component_contexts`）
+    /// 不消费记录，关掉它避免白分配；`scan_raw_counts` 打开。
+    pub(crate) collect_occurrences: bool,
 }
 
 impl ScanDiagnostics {
+    /// 打开逐次记录的构造；默认关闭，见 `collect_occurrences`。
+    #[cfg(any(test, feature = "cli-local"))]
+    fn collecting() -> Self {
+        Self {
+            collect_occurrences: true,
+            ..Default::default()
+        }
+    }
+
+    /// 记一次「未识别容器键 / 对象形态」：同时维护计数、首个样例与逐次记录。
+    /// 位置与说明用闭包延迟构造，只在有消费者（样例或记录）时才分配。
+    fn record_unrecognized(
+        &mut self,
+        location: impl FnOnce() -> crate::output::Location,
+        detail: impl FnOnce() -> String,
+    ) {
+        self.unrecognized_container_key += 1;
+        let need_sample = self.sample_unrecognized_location.is_none();
+        if !need_sample && !self.collect_occurrences {
+            return;
+        }
+        let location = location();
+        if need_sample {
+            self.sample_unrecognized_location = Some(location.clone());
+        }
+        if self.collect_occurrences {
+            self.occurrences.push(ScanOccurrence {
+                code: crate::diagnostics::CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY.to_string(),
+                location,
+                detail: Some(detail()),
+            });
+        }
+    }
+
+    /// 记一次「重复组件 id」：同时维护计数、首个样例与逐次记录（延迟构造同上）。
+    fn record_duplicate(
+        &mut self,
+        location: impl FnOnce() -> crate::output::Location,
+        detail: impl FnOnce() -> String,
+    ) {
+        self.duplicate_component_id += 1;
+        let need_sample = self.sample_duplicate_location.is_none();
+        if !need_sample && !self.collect_occurrences {
+            return;
+        }
+        let location = location();
+        if need_sample {
+            self.sample_duplicate_location = Some(location.clone());
+        }
+        if self.collect_occurrences {
+            self.occurrences.push(ScanOccurrence {
+                code: crate::diagnostics::CODE_SCANNER_DUPLICATE_COMPONENT_ID.to_string(),
+                location,
+                detail: Some(detail()),
+            });
+        }
+    }
+
+    /// 记一次「跨页引用解析不到页面」：计数、首个样例与逐次记录同上。
+    fn record_unresolved_reference(&mut self, location: crate::output::Location, detail: String) {
+        self.unresolved_reference += 1;
+        if self.sample_unresolved_reference_location.is_none() {
+            self.sample_unresolved_reference_location = Some(location.clone());
+        }
+        if self.collect_occurrences {
+            self.occurrences.push(ScanOccurrence {
+                code: crate::diagnostics::CODE_SCANNER_UNRESOLVED_REFERENCE.to_string(),
+                location,
+                detail: Some(detail),
+            });
+        }
+    }
+
+    /// 构造「一个文件解析失败」的诊断（由 indexer 在解析阶段失败时调用）。
+    #[cfg(feature = "cli-local")]
+    pub(crate) fn parse_failure(logical_path: &str, reason: &str) -> Self {
+        let location = crate::output::Location {
+            source_file: Some(logical_path.to_string()),
+            node_id: None,
+            json_path: None,
+        };
+        let reason = format!("{logical_path}: {reason}");
+        Self {
+            parse_failed: 1,
+            sample_parse_failed_location: Some(location.clone()),
+            parse_failed_reason: Some(reason.clone()),
+            occurrences: vec![ScanOccurrence {
+                code: crate::diagnostics::CODE_SCANNER_FILE_PARSE_FAILED.to_string(),
+                location,
+                detail: Some(reason),
+            }],
+            ..Default::default()
+        }
+    }
+
     /// 合并另一份计数（跨文件聚合；样本位置保留首个非空）。
+    ///
+    /// **不合并逐次记录**：聚合信封用不到它们，全库累加会让常驻内存随出现次数增长；
+    /// 需要逐次记录的调用方走 `merge_scanner_occurrence_entries`。
     #[cfg(any(test, feature = "cli-local"))]
     pub(crate) fn merge(&mut self, other: &ScanDiagnostics) {
         self.unrecognized_container_key += other.unrecognized_container_key;
         self.duplicate_component_id += other.duplicate_component_id;
         self.parse_failed += other.parse_failed;
+        self.unresolved_reference += other.unresolved_reference;
+        if self.sample_unresolved_reference_location.is_none() {
+            self.sample_unresolved_reference_location =
+                other.sample_unresolved_reference_location.clone();
+        }
         if self.sample_unrecognized_location.is_none() {
             self.sample_unrecognized_location = other.sample_unrecognized_location.clone();
         }
@@ -231,6 +450,22 @@ impl ScanDiagnostics {
                 format!(
                     "Scanner encountered {} duplicate component ids",
                     self.duplicate_component_id
+                ),
+            ));
+        }
+        if self.unresolved_reference > 0 {
+            let loc = self
+                .sample_unresolved_reference_location
+                .clone()
+                .unwrap_or_default();
+            out.push(crate::diagnostics::envelope_diagnostic(
+                crate::diagnostics::CODE_SCANNER_UNRESOLVED_REFERENCE,
+                self.unresolved_reference,
+                loc,
+                format!(
+                    "{} page reference(s) could not be resolved to a .spg page; \
+                     no edge was created for them",
+                    self.unresolved_reference
                 ),
             ));
         }
@@ -287,14 +522,14 @@ fn collect_component_contexts_inner_with_context_and_diagnostics(
         .is_some_and(|s| !s.is_empty());
     let is_component = current_id.is_some() && has_type;
     if current_id.is_some() && !has_type {
-        diagnostics.unrecognized_container_key += 1;
-        if diagnostics.sample_unrecognized_location.is_none() {
-            diagnostics.sample_unrecognized_location = Some(crate::output::Location {
+        diagnostics.record_unrecognized(
+            || crate::output::Location {
                 source_file: None,
                 node_id: current_id.clone(),
                 json_path: Some(json_path.to_string()),
-            });
-        }
+            },
+            || "object has an id but no type, so it is not treated as a component".to_string(),
+        );
     }
 
     let source = node.get("source").and_then(json_scalar_to_string);
@@ -317,14 +552,14 @@ fn collect_component_contexts_inner_with_context_and_diagnostics(
 
     if is_component && let Some(id) = &current_id {
         if contexts.contains_key(id) {
-            diagnostics.duplicate_component_id += 1;
-            if diagnostics.sample_duplicate_location.is_none() {
-                diagnostics.sample_duplicate_location = Some(crate::output::Location {
+            diagnostics.record_duplicate(
+                || crate::output::Location {
                     source_file: None,
                     node_id: Some(id.clone()),
                     json_path: Some(json_path.to_string()),
-                });
-            }
+                },
+                || "component id was already seen earlier on this page".to_string(),
+            );
         }
         contexts.insert(
             id.clone(),
@@ -405,14 +640,18 @@ fn collect_component_contexts_inner_with_context_and_diagnostics(
             }
             let has_object = arr.iter().any(|item| item.is_object());
             if has_object {
-                diagnostics.unrecognized_container_key += 1;
-                if diagnostics.sample_unrecognized_location.is_none() {
-                    diagnostics.sample_unrecognized_location = Some(crate::output::Location {
+                diagnostics.record_unrecognized(
+                    || crate::output::Location {
                         source_file: None,
                         node_id: current_id.clone(),
                         json_path: Some(format!("{}.{}", json_path, key)),
-                    });
-                }
+                    },
+                    || {
+                        format!(
+                            "array under key '{key}' mixes objects that are not components, so it was skipped"
+                        )
+                    },
+                );
             }
         }
     }
@@ -1281,7 +1520,7 @@ pub fn process_spg_file_from_value_with_identity(
         // Try to resolve resPath as integer index into referenceResources
         if let Some(ref res_path_str) = comp.res_path
             && let Ok(ref_idx) = res_path_str.parse::<usize>()
-            && let Some(target_rel) =
+            && let Ok(target_rel) =
                 resolve_reference_path(rel_path, ref_idx, &meta.reference_resources)
         {
             let target_name = Path::new(&target_rel)
@@ -1453,70 +1692,88 @@ pub fn process_spg_file_from_value_with_identity(
                     }
                 }
                 "link" if action.target_type.as_str() == "app" => {
-                    // Try to resolve path as integer index into referenceResources
-                    if let Some(ref path_str) = action.path
-                        && let Ok(ref_idx) = path_str.parse::<usize>()
-                        && let Some(target_rel) =
-                            resolve_reference_path(rel_path, ref_idx, &meta.reference_resources)
+                    // path 是 referenceResources 的下标；解析不了时没有目标页面可连，
+                    // 但参数表达式里的模型读取与目标无关，仍要入图（诊断由
+                    // `scan_page_reference_failures` 记录）。
+                    // path 缺失（或为 null）与解析失败同样处理：没有目标，但读取照常提取。
                     {
-                        let target_name = Path::new(&target_rel)
-                            .file_stem()
-                            .map(|s| s.to_string_lossy().to_string())
-                            .unwrap_or_else(|| target_rel.clone());
-                        let target_page_id = format!("page:{}", target_rel.replace(r"\", "/"));
-                        add_node(
-                            graph,
-                            target_page_id.clone(),
-                            NodeType::Page,
-                            target_rel.clone(),
-                            target_name.clone(),
-                            None,
-                        )?;
-                        let opens_meta = serde_json::json!({
-                            "reason": format!("Link action opens page '{}'", target_name),
-                            "actor_kind": "action",
-                            "actor_id": action_id,
-                            "operation": "ActionNavigates",
-                            "trigger": action.trigger_type,
-                            "target_model": target_name,
+                        let resolved_target = action
+                            .path
+                            .as_deref()
+                            .and_then(|path_str| path_str.parse::<usize>().ok())
+                            .and_then(|ref_idx| {
+                                resolve_reference_path(rel_path, ref_idx, &meta.reference_resources)
+                                    .ok()
+                            });
+                        let target_name = resolved_target.as_ref().map(|target_rel| {
+                            Path::new(target_rel)
+                                .file_stem()
+                                .map(|s| s.to_string_lossy().to_string())
+                                .unwrap_or_else(|| target_rel.clone())
                         });
-                        add_edge_with_meta(
-                            graph,
-                            &action_id,
-                            &target_page_id,
-                            EdgeType::ActionNavigates,
-                            Some(target_rel.clone()),
-                            Some(opens_meta),
-                        )?;
-
-                        // Process parameter passing via data array
-                        for (param_name, param_value) in &action.data {
-                            let param_id = format!("param:{}/{}", target_name, param_name);
+                        if let (Some(target_rel), Some(target_name)) =
+                            (&resolved_target, &target_name)
+                        {
+                            let target_page_id = format!("page:{}", target_rel.replace(r"\", "/"));
                             add_node(
                                 graph,
-                                param_id.clone(),
-                                NodeType::Field,
+                                target_page_id.clone(),
+                                NodeType::Page,
                                 target_rel.clone(),
-                                param_name.clone(),
+                                target_name.clone(),
                                 None,
                             )?;
-                            let pass_meta = serde_json::json!({
-                                "reason": format!("Link action passes param '{}'", param_name),
+                            let opens_meta = serde_json::json!({
+                                "reason": format!("Link action opens page '{}'", target_name),
                                 "actor_kind": "action",
                                 "actor_id": action_id,
-                                "operation": "PassesParam",
+                                "operation": "ActionNavigates",
                                 "trigger": action.trigger_type,
-                                "target_field": param_name,
-                                "source_expr": param_value,
+                                "target_model": target_name,
                             });
                             add_edge_with_meta(
                                 graph,
                                 &action_id,
-                                &param_id,
-                                EdgeType::PassesParam,
-                                Some(param_value.clone()),
-                                Some(pass_meta),
+                                &target_page_id,
+                                EdgeType::ActionNavigates,
+                                Some(target_rel.clone()),
+                                Some(opens_meta),
                             )?;
+                        }
+
+                        // Process parameter passing via data array
+                        for (param_name, param_value) in &action.data {
+                            // 参数节点与 PassesParam 边挂在目标页面名下，目标解析不了就没有
+                            if let (Some(target_rel), Some(target_name)) =
+                                (&resolved_target, &target_name)
+                            {
+                                let param_id = format!("param:{}/{}", target_name, param_name);
+                                add_node(
+                                    graph,
+                                    param_id.clone(),
+                                    NodeType::Field,
+                                    target_rel.clone(),
+                                    param_name.clone(),
+                                    None,
+                                )?;
+                                let pass_meta = serde_json::json!({
+                                    "reason": format!("Link action passes param '{}'", param_name),
+                                    "actor_kind": "action",
+                                    "actor_id": action_id,
+                                    "operation": "PassesParam",
+                                    "trigger": action.trigger_type,
+                                    "target_field": param_name,
+                                    "source_expr": param_value,
+                                });
+                                add_edge_with_meta(
+                                    graph,
+                                    &action_id,
+                                    &param_id,
+                                    EdgeType::PassesParam,
+                                    Some(param_value.clone()),
+                                    Some(pass_meta),
+                                )?;
+                            }
                             // Parse expression refs from param_value for dependency analysis
                             let refs = crate::superpage::parse_expression_refs(param_value);
                             for ref_type in refs {
@@ -2107,4 +2364,50 @@ pub fn process_spg_file_from_value_with_identity(
     let mut node_ids: Vec<String> = node_ids.into_iter().collect();
     node_ids.sort_unstable();
     Ok(node_ids)
+}
+
+#[cfg(test)]
+mod occurrence_tests {
+    use super::*;
+
+    fn page_with_problems() -> serde_json::Value {
+        serde_json::json!({
+            "canvas": {"components": [
+                {"id": "loose"},
+                {"id": "dup1", "type": "button"},
+                {"id": "dup1", "type": "input"}
+            ]}
+        })
+    }
+
+    /// 只构造组件上下文的遍历不构造逐次记录，但计数照常（避免白分配）。
+    #[test]
+    fn context_only_pass_counts_without_building_records() {
+        let mut diags = ScanDiagnostics::default();
+        let mut contexts = std::collections::HashMap::new();
+        collect_component_contexts_inner_with_context_and_diagnostics(
+            &page_with_problems()["canvas"],
+            "canvas",
+            None,
+            None,
+            &mut contexts,
+            &mut diags,
+        );
+        assert_eq!(diags.unrecognized_container_key, 1);
+        assert_eq!(diags.duplicate_component_id, 1);
+        assert_eq!(diags.occurrences.len(), 0);
+    }
+
+    /// 跨文件聚合只累加计数与样例，不搬运逐次记录（全库常驻内存不随出现次数增长）。
+    #[test]
+    fn merge_does_not_carry_records() {
+        let one_file = scan_raw_counts(&page_with_problems());
+        assert_eq!(one_file.occurrences.len(), 2);
+        let mut acc = ScanDiagnostics::default();
+        acc.merge(&one_file);
+        acc.merge(&one_file);
+        assert_eq!(acc.unrecognized_container_key, 2);
+        assert_eq!(acc.duplicate_component_id, 2);
+        assert_eq!(acc.occurrences.len(), 0);
+    }
 }
