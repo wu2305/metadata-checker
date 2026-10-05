@@ -143,13 +143,13 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 
 ### 6.4 提交与校验：不经 GQL 写
 
-- `--gql` 保持只读（引擎只读会话加形态闸，两道闸不动）。写入走专用命令（暂名 `--annotate <file.json>`），载荷以**脚本为单位**：`{script, script_hash, analyzer, proposals: [{edge_type, from, to, evidence, confidence, attrs}]}`，`proposals` **可以为空**——分析完成但没发现关系也要提交，用来登记「这个脚本在这个 hash 上分析完成」（见 §6.5 的完成记录）。`attrs` 是**按边类型登记的专属属性**（契约表里每个 `Script*` 行声明自己的必填/可选键，例如 `ScriptModifiesComponent` 必填 `property`，落到 `meta.property`；没有专属属性的边类型 `attrs` 必须为空）。
-- 校验全部由契约表驱动，任何一条不过即**拒收该提案并说明原因**（不静默丢弃、不 `panic!`）：
+- `--gql` 保持只读（引擎只读会话加形态闸，两道闸不动）。写入走专用命令（暂名 `--annotate <file.json>`），载荷以**脚本为单位**：`{script, script_hash, analyzer, proposals: [{edge_type, from, to, evidence, evidence_span, confidence, attrs}]}`（`evidence_span` 是提案自己声明的起止行），`proposals` **可以为空**——分析完成但没发现关系也要提交，用来登记「这个脚本在这个 hash 上分析完成」（见 §6.5 的完成记录）。`attrs` 是**按边类型登记的专属属性**（契约表里每个 `Script*` 行声明自己的必填/可选键，例如 `ScriptModifiesComponent` 必填 `property`，落到 `meta.property`；没有专属属性的边类型 `attrs` 必须为空）。
+- 校验全部由契约表驱动，任何一条不过即**拒收并说明原因**（拒收的粒度是整个脚本级提交，见第 5 条）（不静默丢弃、不 `panic!`）：
   1. `edge_type` 必须是表里 `layer = inferred` 的类型；
   2. 起止节点必须已存在，且类型符合该边的端点组合；起点必须是 `Script` 节点；
-  3. 工具自己重读脚本源码：当前 `content_hash` 必须等于提案声明的 `script_hash`，且 `evidence` 必须是脚本文本的逐字子串（防止 LLM 编造依据）；通过后图与 sidecar 只留 `evidence_span` 与 `evidence_sha256`，不留原文；
+  3. 工具自己重读脚本源码：当前 `content_hash` 必须等于提案声明的 `script_hash`，且 `evidence` 必须**恰好等于**提案声明的 `evidence_span` 所指的脚本文本（防止 LLM 编造依据；不在全文里搜子串，因为同一片段多次出现时分不清是哪一处，选任意一处会存下错误位置，所以声明的区间对不上就拒收）；通过后图与 sidecar 只留 `evidence_span` 与 `evidence_sha256`，不留原文；
   4. `confidence` 属于枚举；`analyzer` 非空；每条提案的 `attrs` 键与取值符合该边类型登记的声明（缺必填键或带未登记键即拒收）；
-  5. 幂等键是 `(script_hash, edge_type, from, to, 规范化后的 attrs)`：同一脚本对同一组件的不同属性（`ScriptModifiesComponent` 的 `property` 不同）是不同的事实，不得合并；完全相同的提案重复提交不产生新边。同一脚本的新提交整体替换它此前的标注（按 `script` 与 `script_hash` 覆盖，空 `proposals` 即清空）。
+  5. 幂等键是 `(script_hash, edge_type, from, to, 规范化后的 attrs)`：同一脚本对同一组件的不同属性（`ScriptModifiesComponent` 的 `property` 不同）是不同的事实，不得合并；完全相同的提案重复提交不产生新边。同一脚本的新提交整体替换它此前的标注（按 `script` 与 `script_hash` 覆盖，空 `proposals` 即清空）。**原子性：一次脚本级提交里只要有一条提案校验不过，整个提交都被拒收**，此前的标注与完成记录原样保留，拒收原因逐条列出；否则被接受的子集会删掉此前有效的事实，还会产生一条看起来「分析已完成」的记录。
 - 校验只保证「形状合法、有真实依据」，**不保证 LLM 的判断正确**。解释规则新增一条：衍生边是建议性的，回答中要标明「由脚本分析推断，置信度 X」，不得当作确定事实陈述。
 
 ### 6.5 持久化与重建
