@@ -116,12 +116,14 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 | 重建 | 随时从原始元数据重新生成 | **不能**由扫描重新生成；见 §6.5 |
 | 类型 | 现有 22 种边及 S3/S4 新增 | 专用的 `Script*` 边族，**与扫描边类型不相交** |
 
+**层由边类型决定，不由 `origin` 属性决定。** 脚本里能被确定性解析（oxc）推出的关系（[图优先重设计](2026-10-02-graph-first-redesign-design.md) 阶段 5 的层 1）同样是可重建的扫描事实，登记为扫描层的边类型，**与本节的 `Script*` 衍生边族不相交**（具体名字在登记它们的 PR 里定）；`origin=parser` / `origin=llm` 只是来源标注，不是隔离手段，否则 `MATCH ()-[r:ScriptReads]->()` 会把 LLM 的推断当成解析结果。同一种关系两层都可能产生时，是两个不同的边类型；LLM 提交里层 1 已能推出的关系仍按 §6.4 被拒。
+
 **不复用 `Reads` / `ActionWrites` 等扫描边类型。** 否则 `MATCH ()-[r:Reads]->()` 会悄悄混入 LLM 的猜测，读图者无法分辨，且违背「扫描事实可差分验证」。边类型本身就是隔离，不依赖读图者记得加 `WHERE`。
 
 ### 6.3 图形状（契约表新增的行，随 S6 落地）
 
 - 新节点类型 `Script`：脚本本身。id `script:<源文件>|<脚本引用>`；`meta` 含 `kind`（`frontend`：普通 `.ts`；`backend`：`action.ts`，Nashorn）、`content_hash`（脚本文本的 hash）、`entry_names`（已知函数名，如 `setMsg`）。
-- 新**扫描**边（确定性，属于扫描事实）：`ExecutesScript`：`Action → Script`（前端 `script` action，按 `scriptFunction` 在页面绑定的 `.ts` 文件里定位函数；页面与 `.ts` 的绑定规则见 §7 问题 9）；后端：`workflow 节点 → Script` 的链接边（暂名 `LinksScript`）由扫描从工作流元数据里的 `action.ts` 路径确定性地产生；路径解析不到文件时落占位 `Script` 节点并报诊断，不静默丢弃。扫描只负责「这里有一段脚本」，不解读脚本。
+- 新**扫描**边（确定性，属于扫描事实）：`ExecutesScript`：`Action → Script`（前端 `script` action，按 `scriptFunction` 在页面绑定的 `.ts` 文件里定位函数；页面与 `.ts` 的绑定规则见 §7 问题 9）；后端：`workflow 节点 → Script` 的链接边（暂名 `LinksScript`）由扫描从工作流元数据里的 `action.ts` 路径确定性地产生；路径解析不到文件时**不造占位 `Script` 节点**（与页面引用的处理一致：不为不存在的文件造节点，PR #9），而是把未解析的脚本标识（裸 hash id 或路径原文）记为一条 `Diagnostic`，用 `HasDiagnostic` 边挂在发出引用的 `Action` / `Model` 上（诊断入图见[图优先重设计](2026-10-02-graph-first-redesign-design.md) §2.3）；这样 GQL 仍能从发出引用的节点出发查到「它期望哪个脚本、没找到」，不静默丢弃（2026-10-05 修订：原为占位节点，会让 `Script` 计数里混入没有文件的节点）。扫描只负责「这里有一段脚本」，不解读脚本。
 - 新**衍生**边（仅起点为 `Script` 节点，端点必须是图里已存在的节点）：
 
 | 边类型 | 端点 | 含义 |
@@ -137,7 +139,7 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 清单是起点，不是穷举；每增一种都要在契约表加行（`layer = inferred`）并说明「缺席何时不代表没有」。
 
 - 脚本改页面内容使「静态元数据 = 运行时页面」不再成立。契约表解释规则新增 `script-may-change-page`：被 `ScriptModifiesComponent` 指向的组件，其静态属性（显隐、取值、绑定）只是初始状态；没有该边不代表没有脚本改它（脚本分析未做或判断为空），回答要说明这一点。
-- 每条衍生边的**必填属性**：`analyzer`（模型标识 + 提示词版本）、`script_hash`（分析时脚本的 hash）、`confidence`（`high` / `medium` / `low`）、`evidence`（脚本里的原文片段）、`analyzed_at`、`status`（`current` / `stale`）。因为要被 GQL 过滤（`r.status = 'current'`），这些必须是**扁平边属性**，不放进 JSON 文本 `meta`；这也是需要 schema v2（§3.3）的原因之一。
+- 每条衍生边的**必填属性**：`analyzer`（模型标识 + 提示词版本）、`script_hash`（分析时脚本的 hash）、`confidence`（`high` / `medium` / `low`）、`evidence`（脚本里的原文片段；**仅用于校验，不落盘**：提交载荷带原文，校验器核对逐字子串后，图与 sidecar 只保存 `evidence_span`（起止行）与 `evidence_sha256`，不保存片段原文——否则与「不把脚本原文存进图」冲突，且逐字片段可能恰好带出同处的硬编码凭据）、`analyzed_at`、`status`（`current` / `stale`）。因为要被 GQL 过滤（`r.status = 'current'`），这些必须是**扁平边属性**，不放进 JSON 文本 `meta`；这也是需要 schema v2（§3.3）的原因之一。
 
 ### 6.4 提交与校验：不经 GQL 写
 
@@ -145,7 +147,7 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 - 校验全部由契约表驱动，任何一条不过即**拒收该提案并说明原因**（不静默丢弃、不 `panic!`）：
   1. `edge_type` 必须是表里 `layer = inferred` 的类型；
   2. 起止节点必须已存在，且类型符合该边的端点组合；起点必须是 `Script` 节点；
-  3. 工具自己重读脚本源码：当前 `content_hash` 必须等于提案声明的 `script_hash`，且 `evidence` 必须是脚本文本的逐字子串（防止 LLM 编造依据）；
+  3. 工具自己重读脚本源码：当前 `content_hash` 必须等于提案声明的 `script_hash`，且 `evidence` 必须是脚本文本的逐字子串（防止 LLM 编造依据）；通过后图与 sidecar 只留 `evidence_span` 与 `evidence_sha256`，不留原文；
   4. `confidence` 属于枚举；`analyzer` 非空；
   5. 同一 `(from, to, edge_type, script_hash)` 幂等。
 - 校验只保证「形状合法、有真实依据」，**不保证 LLM 的判断正确**。解释规则新增一条：衍生边是建议性的，回答中要标明「由脚本分析推断，置信度 X」，不得当作确定事实陈述。
