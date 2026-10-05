@@ -274,17 +274,7 @@ pub fn id_shape_problem(id: &str) -> Option<&'static str> {
         "comp" if pipes != 1 => Some("应为 `<页面>|<组件 id>` 两段"),
         "action" if pipes != 2 => Some("应为 `<页面>|<组件 id>|<动作 id>` 三段"),
         "cond" if pipes != 1 => Some("应为 `<页面>|<条件局部名>` 两段"),
-        "cond" => {
-            // 条件局部名形如 `<属主>#<属性或动作>#<序号|conditionExp|condition>`，
-            // 或 `<source>#filter#<n>#exp|clause`：3 或 4 段，各段非空
-            let local = rest.split_once('|').map_or("", |(_, local)| local);
-            let parts = local.split('#').count();
-            if local.split('#').any(str::is_empty) || !(3..=4).contains(&parts) {
-                Some("条件局部名应为 3 或 4 个非空的 `#` 段")
-            } else {
-                None
-            }
-        }
+        "cond" => cond_local_problem(rest.split_once('|').map_or("", |(_, local)| local)),
         "model" | "field" | "param" if pipes > 1 => {
             Some("至多一个 `|`（全局名或 `<页面>|<局部名>`）")
         }
@@ -311,6 +301,39 @@ pub fn id_shape_problem(id: &str) -> Option<&'static str> {
         "page" | "user" | "system" | "comp" | "action" | "model" | "param" => None,
         _ => Some("未知的 kind 前缀"),
     }
+}
+
+/// 条件 id 的局部名（`|` 之后的部分）。**从右往左**认固定后缀，属主部分不设限：
+/// SPG 里的 source id / 组件 id / 动作 id 本身可以含 `#`，按 `#` 切成固定段数会把这种合法页面拒掉。
+///
+/// 三种后缀形态（见 `conditions.rs` 的 `condition_id` 构造）：
+/// - `<属主>#filter#<n>#exp` / `…#clause`：模型过滤条件，`<n>` 是数字，`<属主>`（source id）非空；
+/// - `<组件>#<动作>#conditionExp` / `…#condition`：动作条件，组件与动作都非空；
+/// - `<组件>#<属性>#<序号>`：组件表达式，序号是数字，组件与属性都非空。
+fn cond_local_problem(local: &str) -> Option<&'static str> {
+    const SHAPE: Option<&str> = Some(
+        "条件局部名应为 `<source>#filter#<n>#exp|clause`、`<组件>#<动作>#conditionExp|condition` 或 `<组件>#<属性>#<序号>`，各部分非空",
+    );
+    let is_number = |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit());
+    let non_empty_pair = |text: &str| {
+        text.rsplit_once('#')
+            .is_some_and(|(left, right)| !left.is_empty() && !right.is_empty())
+    };
+    let Some((head, tail)) = local.rsplit_once('#') else {
+        return SHAPE;
+    };
+    let valid = match tail {
+        "exp" | "clause" => head.rsplit_once('#').is_some_and(|(owner_filter, number)| {
+            is_number(number)
+                && owner_filter
+                    .rsplit_once('#')
+                    .is_some_and(|(owner, marker)| marker == "filter" && !owner.is_empty())
+        }),
+        "conditionExp" | "condition" => non_empty_pair(head),
+        number if is_number(number) => non_empty_pair(head),
+        _ => false,
+    };
+    if valid { None } else { SHAPE }
 }
 
 /// `text` 里是否存在一个不在首尾的分隔字节（它两侧都至少还有一个字符）。

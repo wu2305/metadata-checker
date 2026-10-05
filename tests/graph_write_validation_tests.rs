@@ -242,6 +242,13 @@ fn node_ids_with_an_empty_or_miscounted_segment_are_rejected() {
         (NodeType::Condition, "cond:app/a.spg|#exp#0"),
         (NodeType::Condition, "cond:app/a.spg|btn##0"),
         (NodeType::Condition, "cond:app/a.spg|btn#exp#0#x#y"),
+        // 含 `#` 的属主也要认固定后缀：后缀形态错、序号非数字、属主为空仍然拒收
+        (NodeType::Condition, "cond:app/a.spg|m#1#filter#x#exp"),
+        (NodeType::Condition, "cond:app/a.spg|#filter#0#exp"),
+        (NodeType::Condition, "cond:app/a.spg|m#1#other#0#exp"),
+        (NodeType::Condition, "cond:app/a.spg|btn#a1#nope"),
+        (NodeType::Condition, "cond:app/a.spg|btn#a1#"),
+        (NodeType::Condition, "cond:app/a.spg|#a1#conditionExp"),
     ];
     for (node_type, id) in bad_ids {
         let violations = graph_schema::node_violations(
@@ -281,6 +288,12 @@ fn well_formed_node_ids_pass_the_grammar_check() {
         (NodeType::Condition, "cond:app/a.spg|btn#exp#0"),
         (NodeType::Condition, "cond:app/a.spg|btn#a1#conditionExp"),
         (NodeType::Condition, "cond:app/a.spg|flow1#filter#0#exp"),
+        (NodeType::Condition, "cond:app/a.spg|flow1#filter#2#clause"),
+        // source / 组件 / 动作 id 本身含 `#`
+        (NodeType::Condition, "cond:app/a.spg|m#1#filter#0#exp"),
+        (NodeType::Condition, "cond:app/a.spg|b#1#a#1#conditionExp"),
+        (NodeType::Condition, "cond:app/a.spg|b#1#a#1#condition"),
+        (NodeType::Condition, "cond:app/a.spg|b#1#visibleCondition#0"),
     ];
     for (node_type, id) in good_ids {
         let violations =
@@ -359,6 +372,39 @@ fn tbl_dimension_with_an_empty_name_is_rejected() {
             message.contains(expected),
             true,
             "缺少 {expected}：{message}"
+        );
+    }
+}
+
+/// SPG 的 source id / 组件 id 本身可以含 `#`（与条件 id 的分隔符同一个字符）。条件 id 是
+/// `<属主>#filter#<n>#exp` 之类的固定后缀接在属主之后，所以必须从右往左认后缀，属主部分
+/// 不设限；按 `#` 切成固定段数会把这种合法页面整个拒掉、让扫描中止。
+#[test]
+fn scan_accepts_hash_in_source_and_component_ids() {
+    let page = serde_json::json!({
+        "version": "1", "params": [],
+        "sources": [
+            {"id": "m#1", "modelType": "dwtable", "path": "data/t.tbl",
+             "filter": {"scope": "self", "matchAll": true,
+                        "clauses": [{"exp": "m#1.status = 'active'"}]}}
+        ],
+        "canvas": {"id": "canvas", "type": "canvas", "components": [
+            {"id": "b#1", "type": "button", "visibleCondition": "=1 = 1",
+             "actions": [{"id": "a#1", "type": "showComponent", "target": "x",
+                          "conditionExp": "=1 = 1"}]}
+        ]}
+    });
+    let mut store = MemoryGraphStore::new();
+    let ids = process_spg_file_from_value(&mut store, PAGE, page)
+        .unwrap_or_else(|error| panic!("含 # 的 id 是合法的：{error:#}"));
+    for expected in [
+        "cond:app/a.spg|m#1#filter#0#exp",
+        "cond:app/a.spg|b#1#a#1#conditionExp",
+    ] {
+        assert_eq!(
+            ids.iter().any(|id| id == expected),
+            true,
+            "缺少 {expected}：{ids:?}"
         );
     }
 }
