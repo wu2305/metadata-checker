@@ -489,3 +489,260 @@ fn redb_store_reports_node_types() {
     drop(store);
     std::fs::remove_dir_all(&dir).expect("remove dir");
 }
+
+// ------------------------------------------------------------ 失败的扫描不得改动图
+
+/// Grafeo 直写、没有事务：违规若在批删与真实写入之后才暴露，图就留下半份、FileState 又没
+/// 更新，重试清不干净。所以校验必须在任何改动之前完成（`apply_incremental_changes` 先干跑）。
+/// 这里用真实的 `.grafeo` 增量扫描证明：失败的扫描不改动图与文件状态。
+#[cfg(all(feature = "cli-local", feature = "grafeo-store"))]
+mod failed_scan_leaves_graph_untouched {
+    use metadata_checker::graph::Node;
+    use metadata_checker::graph_grafeo::GrafeoGraphStore;
+    use metadata_checker::graph_store::{GraphReadStore, IndexStateStore};
+    use metadata_checker::scanner::indexer::ProjectIndexer;
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+
+    /// 带内嵌 dataflow 的页面；`length` 决定该页面合规（数字）还是违规（字符串，契约要求 number）。
+    fn page_with_length(length: serde_json::Value, extra_component: &str) -> String {
+        serde_json::json!({
+            "version": "1",
+            "params": [],
+            "sources": [{"id": "flow1", "modelType": "dataflow", "content": {
+                "dimensions": [{"name": "x", "length": length}]
+            }}],
+            "canvas": {"id": "canvas", "type": "canvas", "components": [
+                {"id": extra_component, "type": "button"}
+            ]}
+        })
+        .to_string()
+    }
+
+    fn good(extra_component: &str) -> String {
+        page_with_length(serde_json::json!(10), extra_component)
+    }
+
+    fn bad(extra_component: &str) -> String {
+        page_with_length(serde_json::json!("not-a-number"), extra_component)
+    }
+
+    struct Project {
+        dir: PathBuf,
+    }
+
+    impl Project {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "l0-failed-scan-{tag}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("clock")
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&dir).expect("create dir");
+            Self { dir }
+        }
+        fn write(&self, name: &str, text: &str) {
+            std::fs::write(self.dir.join(name), text).expect("write");
+        }
+        fn db(&self) -> PathBuf {
+            self.dir.join("db").join("g.grafeo")
+        }
+        fn project(&self) -> PathBuf {
+            self.dir.join("src")
+        }
+        fn write_src(&self, name: &str, text: &str) {
+            std::fs::create_dir_all(self.project()).expect("src dir");
+            std::fs::write(self.project().join(name), text).expect("write src");
+        }
+        fn scan(&self) -> anyhow::Result<()> {
+            std::fs::create_dir_all(self.dir.join("db")).expect("db dir");
+            ProjectIndexer::scan(&self.project(), &self.db()).map(|_| ())
+        }
+    }
+
+    impl Drop for Project {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    /// 图的完整快照：节点、每条出边、文件状态。字符串化后可逐字节比较。
+    #[derive(Debug, PartialEq, Eq)]
+    struct Snapshot {
+        nodes: Vec<String>,
+        edges: Vec<String>,
+        file_states: BTreeMap<String, String>,
+    }
+
+    fn snapshot(db: &Path) -> Snapshot {
+        let store = GrafeoGraphStore::open(db).expect("open grafeo");
+        let nodes: Vec<Node> = store.iter_nodes().expect("iter nodes").collect();
+        let mut edges = Vec::new();
+        for node in &nodes {
+            let neighbors = store
+                .get_node_edges(&node.id)
+                .expect("edges")
+                .expect("node exists");
+            for view in neighbors.outgoing {
+                edges.push(serde_json::to_string(&view.edge).expect("edge json"));
+            }
+        }
+        edges.sort();
+        let file_states = store
+            .load_file_states()
+            .expect("file states")
+            .into_iter()
+            .map(|(path, state)| (path, serde_json::to_string(&state).expect("state json")))
+            .collect();
+        Snapshot {
+            nodes: nodes
+                .iter()
+                .map(|node| serde_json::to_string(node).expect("node json"))
+                .collect(),
+            edges,
+            file_states,
+        }
+    }
+
+    /// 节点与边（不含 FileState：mtime 会随写入时间不同）。
+    fn graph_only(snapshot: &Snapshot) -> (&Vec<String>, &Vec<String>) {
+        (&snapshot.nodes, &snapshot.edges)
+    }
+
+    fn assert_rejected_naming(result: anyhow::Result<()>, file: &str) {
+        let message = format!("{:#}", result.expect_err("违规的扫描必须报错"));
+        for expected in [file, "meta 键 length 类型不符", "写入校验未通过"] {
+            assert_eq!(
+                message.contains(expected),
+                true,
+                "缺少 {expected}：{message}"
+            );
+        }
+    }
+
+    /// (1) 同一批里先有一个合规的新文件、再有一个违规的新文件：整批不落，图与 FileState 原样。
+    #[test]
+    fn violating_new_file_after_a_valid_one_changes_nothing() {
+        let project = Project::new("new-file");
+        project.write_src("m.spg", &good("m_btn"));
+        project.scan().expect("首次扫描合规");
+        let before = snapshot(&project.db());
+
+        // a_ok.spg 排在 z_bad.spg 之前，会先被处理
+        project.write_src("a_ok.spg", &good("ok_btn"));
+        project.write_src("z_bad.spg", &bad("bad_btn"));
+        assert_rejected_naming(project.scan(), "z_bad.spg");
+        assert_eq!(
+            snapshot(&project.db()),
+            before,
+            "失败的扫描不得改动图与文件状态"
+        );
+    }
+
+    /// (2) 违规文件此前已存在（批删本会触发）：旧节点必须还在，同批里合规文件的新内容也不落。
+    #[test]
+    fn violating_edit_of_an_existing_file_keeps_its_old_nodes() {
+        let project = Project::new("existing-file");
+        project.write_src("a.spg", &good("a_btn"));
+        project.write_src("m.spg", &good("m_btn"));
+        project.scan().expect("首次扫描合规");
+        let before = snapshot(&project.db());
+
+        // a.spg 先处理（合规的改动：换了组件），m.spg 随后违规
+        project.write_src("a.spg", &good("a_btn_renamed"));
+        project.write_src("m.spg", &bad("m_btn_renamed"));
+        assert_rejected_naming(project.scan(), "m.spg");
+        let after = snapshot(&project.db());
+        assert_eq!(after, before, "失败的扫描不得改动图与文件状态");
+        assert_eq!(
+            after
+                .nodes
+                .iter()
+                .any(|node| node.contains("comp:m.spg|m_btn\"")),
+            true,
+            "违规文件的旧节点必须还在"
+        );
+        assert_eq!(
+            after
+                .nodes
+                .iter()
+                .any(|node| node.contains("a_btn_renamed")),
+            false,
+            "同批合规文件的新内容也不得落库"
+        );
+    }
+
+    /// 空图上的首次扫描不干跑（省耗时），失败后把整张图清回空：失败的首次扫描不留任何节点、
+    /// 边与文件状态；修好后下一次扫描与干净扫描相同（不会残留失败那次写下的节点）。
+    #[test]
+    fn violating_first_scan_rolls_back_to_an_empty_graph() {
+        let project = Project::new("first-scan");
+        project.write_src("a_ok.spg", &good("ok_btn"));
+        project.write_src("z_bad.spg", &bad("bad_btn"));
+        let message = format!("{:#}", project.scan().expect_err("违规的首次扫描必须报错"));
+        for expected in ["z_bad.spg", "meta 键 length 类型不符", "已回滚"] {
+            assert_eq!(
+                message.contains(expected),
+                true,
+                "缺少 {expected}：{message}"
+            );
+        }
+        let after = snapshot(&project.db());
+        assert_eq!(
+            after.nodes,
+            Vec::<String>::new(),
+            "失败的首次扫描不得留下节点"
+        );
+        assert_eq!(
+            after.edges,
+            Vec::<String>::new(),
+            "失败的首次扫描不得留下边"
+        );
+        assert_eq!(
+            after.file_states.is_empty(),
+            true,
+            "失败的首次扫描不得记录文件状态"
+        );
+
+        // 修复后产出的节点比失败那次更少：a_ok.spg 去掉一个组件，z_bad.spg 修好
+        project.write_src("z_bad.spg", &good("bad_btn_fixed"));
+        project.scan().expect("修复后扫描成功");
+        let recovered = snapshot(&project.db());
+        let clean = Project::new("first-scan-clean");
+        clean.write_src("a_ok.spg", &good("ok_btn"));
+        clean.write_src("z_bad.spg", &good("bad_btn_fixed"));
+        clean.scan().expect("干净全量扫描");
+        assert_eq!(graph_only(&recovered), graph_only(&snapshot(&clean.db())));
+    }
+
+    /// (3) 修好文件后下一次扫描成功，结果与对最终内容做一次干净全量扫描相同。
+    #[test]
+    fn fixing_the_file_makes_the_next_scan_match_a_clean_scan() {
+        let project = Project::new("fix");
+        project.write_src("a.spg", &good("a_btn"));
+        project.write_src("m.spg", &good("m_btn"));
+        project.scan().expect("首次扫描合规");
+
+        project.write_src("a.spg", &good("a_btn_renamed"));
+        project.write_src("m.spg", &bad("m_btn_renamed"));
+        project.scan().expect_err("违规");
+        // 修复：产出的节点比失败那次更少（没有 m_btn_renamed 之外的残留可言）
+        project.write_src("m.spg", &good("m_btn_fixed"));
+        project.scan().expect("修复后扫描成功");
+        let recovered = snapshot(&project.db());
+
+        let clean = Project::new("fix-clean");
+        clean.write_src("a.spg", &good("a_btn_renamed"));
+        clean.write_src("m.spg", &good("m_btn_fixed"));
+        clean.scan().expect("干净全量扫描");
+        let expected = snapshot(&clean.db());
+        assert_eq!(graph_only(&recovered), graph_only(&expected));
+        assert_eq!(
+            recovered.file_states.keys().collect::<Vec<_>>(),
+            expected.file_states.keys().collect::<Vec<_>>()
+        );
+    }
+}

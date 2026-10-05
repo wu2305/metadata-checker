@@ -11,8 +11,10 @@ use super::{
 };
 use crate::graph::{FileState, GraphDB, Node, NodeType};
 use crate::graph_store::{
-    GraphReadStore, GraphStoreResult, GraphWriteStore, IndexCommit, IndexReport, IndexStateStore,
+    GraphReadStore, GraphStoreError, GraphStoreResult, GraphWriteStore, IndexCommit, IndexReport,
+    IndexStateStore,
 };
+use crate::graph_write_guard::DryRunSink;
 use crate::ownership::{
     ContributionKind, EdgeContribution, EntityContribution, FileContributionLedger, ProjectBinding,
 };
@@ -840,12 +842,33 @@ impl ProjectIndexer {
         updates: &[ParsedGraphUpdate],
         deleted: &[DeletedFile],
     ) -> Result<HashMap<String, Vec<String>>> {
+        Self::apply_changes(graph, new_states, updates, deleted, true)
+    }
+
+    /// `apply_incremental_changes` 的实现。`preflight` 决定是否先干跑校验：
+    ///
+    /// L0 写入校验：Grafeo 直写没有事务，批删与真实写入一旦开始就无法回滚；违规若在中途
+    /// 才暴露，会留下半份图，而 FileState 没更新、重试清不干净（例如修复后产出的节点变少，
+    /// 失败那次的残留节点永远不会被清掉）。所以默认先把整批经 [`SchemaGuard`] 写进
+    /// [`DryRunSink`] 干跑，全部通过才批删并真实写入；违规时图与 FileState 原样不动。
+    /// 干跑要把每个文件多处理一遍，全量扫描时约多 14% 耗时，所以对「空图上的首次全量扫描」
+    /// 由调用方传 `false`、改用失败后清空整张图的补偿（见 `scan_store_body`）。
+    fn apply_changes(
+        graph: &mut dyn GraphWriteStore,
+        new_states: &mut HashMap<String, FileState>,
+        updates: &[ParsedGraphUpdate],
+        deleted: &[DeletedFile],
+        preflight: bool,
+    ) -> Result<HashMap<String, Vec<String>>> {
         let merged_removed = merge_removed_node_ids(
             updates
                 .iter()
                 .map(|update| update.previous_node_ids.as_slice())
                 .chain(deleted.iter().map(|(_, node_ids)| node_ids.as_slice())),
         );
+        if preflight {
+            Self::preflight_schema(&*graph, updates, &merged_removed)?;
+        }
         if !merged_removed.is_empty() {
             graph.remove_nodes_by_ids(&merged_removed)?;
         }
@@ -868,6 +891,67 @@ impl ProjectIndexer {
         }
 
         Ok(touched_nodes)
+    }
+
+    /// 写入前干跑：把本批每个文件经 [`SchemaGuard`] 写进 [`DryRunSink`]，查出全部违规。
+    ///
+    /// 只读真实存储（`node_type_of`），不做任何写入，所以违规时图与 FileState 原样不动、
+    /// 文件保持脏。每个文件至多报它的第一处违规；多个文件违规时合并成一条
+    /// `GraphStoreError::SchemaViolation`（每条自带源文件、节点或边、原因）。
+    /// 非校验类错误（解析失败等，真实写入同样会遇到）按原样立即返回，同样发生在改动之前。
+    fn preflight_schema(
+        graph: &dyn GraphWriteStore,
+        updates: &[ParsedGraphUpdate],
+        removed: &[String],
+    ) -> Result<()> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+        let removed: HashSet<&str> = removed.iter().map(String::as_str).collect();
+        let mut sink = DryRunSink::new(graph, &removed);
+        let mut violations: Vec<String> = Vec::new();
+        for update in updates {
+            let result = match &update.content {
+                ParsedGraphContent::Spg(value) => {
+                    process_spg_file_from_value(&mut sink, &update.logical_path, value.clone())
+                }
+                ParsedGraphContent::Tbl(content) => {
+                    process_tbl_file_from_string(&mut sink, &update.logical_path, content)
+                }
+            };
+            let Err(error) = result else { continue };
+            match error
+                .chain()
+                .find_map(|cause| cause.downcast_ref::<GraphStoreError>())
+            {
+                Some(GraphStoreError::SchemaViolation { message }) => {
+                    violations.push(message.clone());
+                }
+                _ => return Err(error),
+            }
+        }
+        if violations.is_empty() {
+            return Ok(());
+        }
+        Err(anyhow::Error::new(GraphStoreError::SchemaViolation {
+            message: violations.join("\n"),
+        })
+        .context("写入校验未通过：图与文件状态未改动，相关文件保持待扫描"))
+    }
+
+    /// 空图上的首次扫描失败后的补偿：扫描开始时图是空的，所以清空全部项目节点（连带其边）
+    /// 就恰好回到扫描前；FileState 在提交前从未写入，文件保持待扫描。
+    /// 清空本身失败时，把两个错误都带上，不假装已回滚。
+    fn rollback_fresh_graph(store: &mut dyn IndexScanStore, error: anyhow::Error) -> anyhow::Error {
+        let node_ids: GraphStoreResult<Vec<String>> = store
+            .iter_nodes()
+            .map(|nodes| nodes.map(|node| node.id).collect());
+        match node_ids.and_then(|ids| store.remove_nodes_by_ids(&ids)) {
+            Ok(()) => error.context("扫描失败：空图上的首次扫描已回滚，图保持为空"),
+            Err(rollback) => error.context(format!(
+                "扫描失败，且回滚清空失败（图可能残留部分写入）：{rollback}"
+            )),
+        }
     }
 
     /// 阶段 6：持久化索引结果
@@ -1085,13 +1169,24 @@ impl ProjectIndexer {
                     } else {
                         Vec::new()
                     };
+                    // L0：空图上的首次全量扫描没有旧内容可保护，不干跑（省掉每个文件
+                    // 多处理一遍的耗时），失败后把整张图清回空；其余情形先干跑再写。
+                    let fresh =
+                        prev_states.is_empty() && store.node_count().is_ok_and(|count| count == 0);
                     // M54：dirty previous IDs 与 deleted IDs 合并去重后只做一次图批删
-                    let parsed_nodes = Self::apply_incremental_changes(
+                    let parsed_nodes = match Self::apply_changes(
                         &mut *store,
                         &mut new_states,
                         &updates,
                         &plan.deleted,
-                    )?;
+                        !fresh,
+                    ) {
+                        Ok(parsed_nodes) => parsed_nodes,
+                        Err(error) if fresh => {
+                            return Err(Self::rollback_fresh_graph(store, error));
+                        }
+                        Err(error) => return Err(error),
+                    };
                     // M56：apply 后收集新增/变更节点的 incident edges
                     let new_node_ids: Vec<String> = parsed_nodes
                         .values()

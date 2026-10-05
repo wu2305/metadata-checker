@@ -128,3 +128,60 @@ impl GraphWriteStore for SchemaGuard<'_> {
         }
     }
 }
+
+/// 干跑用的写入沉：只记录「本批写过的节点类型」，丢弃一切内容，**不改动任何真实存储**。
+///
+/// 用法：先让一批文件经 [`SchemaGuard`] 写进沉里，把全部违规一次性查出来；没有违规才对
+/// 真实存储做批删与真实写入（`scanner/indexer.rs::apply_incremental_changes`）。这样
+/// 校验失败时图和文件状态都还是原样（Grafeo 直写、没有事务，事后无法回滚）。
+///
+/// 端点类型解析顺序与真实写入一致：本批先写的文件优先；其次是真实存储里已有、且本批
+/// 不会删除的节点。本批要删除的节点（`removed`）在真实写入时已不存在，所以视为不存在，
+/// 除非本批又把它们写了回来。
+pub struct DryRunSink<'a> {
+    real: &'a dyn GraphWriteStore,
+    removed: &'a std::collections::HashSet<&'a str>,
+    node_types: HashMap<String, NodeType>,
+}
+
+impl<'a> DryRunSink<'a> {
+    /// `real` 只读（只会调 `node_type_of`）；`removed` 是本批将批删的节点 id。
+    pub fn new(
+        real: &'a dyn GraphWriteStore,
+        removed: &'a std::collections::HashSet<&'a str>,
+    ) -> Self {
+        Self {
+            real,
+            removed,
+            node_types: HashMap::new(),
+        }
+    }
+}
+
+impl GraphWriteStore for DryRunSink<'_> {
+    fn upsert_node(&mut self, node: Node) -> GraphStoreResult<()> {
+        self.node_types.insert(node.id, node.node_type);
+        Ok(())
+    }
+
+    fn add_edge(&mut self, _edge: Edge) -> GraphStoreResult<()> {
+        Ok(())
+    }
+
+    fn remove_nodes_by_ids(&mut self, node_ids: &[String]) -> GraphStoreResult<()> {
+        for id in node_ids {
+            self.node_types.remove(id);
+        }
+        Ok(())
+    }
+
+    fn node_type_of(&self, node_id: &str) -> GraphStoreResult<Option<NodeType>> {
+        if let Some(node_type) = self.node_types.get(node_id) {
+            return Ok(Some(node_type.clone()));
+        }
+        if self.removed.contains(node_id) {
+            return Ok(None);
+        }
+        self.real.node_type_of(node_id)
+    }
+}
