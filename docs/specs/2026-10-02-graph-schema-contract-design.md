@@ -143,19 +143,19 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 
 ### 6.4 提交与校验：不经 GQL 写
 
-- `--gql` 保持只读（引擎只读会话加形态闸，两道闸不动）。写入走专用命令（暂名 `--annotate <file.json>`），载荷是提案列表：`{edge_type, from, to, script_hash, evidence, confidence, analyzer, attrs}`。`attrs` 是**按边类型登记的专属属性**（契约表里每个 `Script*` 行声明自己的必填/可选键，例如 `ScriptModifiesComponent` 必填 `property`，落到 `meta.property`；没有专属属性的边类型 `attrs` 必须为空）。
+- `--gql` 保持只读（引擎只读会话加形态闸，两道闸不动）。写入走专用命令（暂名 `--annotate <file.json>`），载荷以**脚本为单位**：`{script, script_hash, analyzer, proposals: [{edge_type, from, to, evidence, confidence, attrs}]}`，`proposals` **可以为空**——分析完成但没发现关系也要提交，用来登记「这个脚本在这个 hash 上分析完成」（见 §6.5 的完成记录）。`attrs` 是**按边类型登记的专属属性**（契约表里每个 `Script*` 行声明自己的必填/可选键，例如 `ScriptModifiesComponent` 必填 `property`，落到 `meta.property`；没有专属属性的边类型 `attrs` 必须为空）。
 - 校验全部由契约表驱动，任何一条不过即**拒收该提案并说明原因**（不静默丢弃、不 `panic!`）：
   1. `edge_type` 必须是表里 `layer = inferred` 的类型；
   2. 起止节点必须已存在，且类型符合该边的端点组合；起点必须是 `Script` 节点；
   3. 工具自己重读脚本源码：当前 `content_hash` 必须等于提案声明的 `script_hash`，且 `evidence` 必须是脚本文本的逐字子串（防止 LLM 编造依据）；通过后图与 sidecar 只留 `evidence_span` 与 `evidence_sha256`，不留原文；
-  4. `confidence` 属于枚举；`analyzer` 非空；`attrs` 的键与取值符合该边类型登记的声明（缺必填键或带未登记键即拒收）；
-  5. 同一 `(from, to, edge_type, script_hash)` 幂等。
+  4. `confidence` 属于枚举；`analyzer` 非空；每条提案的 `attrs` 键与取值符合该边类型登记的声明（缺必填键或带未登记键即拒收）；
+  5. 幂等键是 `(script_hash, edge_type, from, to, 规范化后的 attrs)`：同一脚本对同一组件的不同属性（`ScriptModifiesComponent` 的 `property` 不同）是不同的事实，不得合并；完全相同的提案重复提交不产生新边。同一脚本的新提交整体替换它此前的标注（按 `script` 与 `script_hash` 覆盖，空 `proposals` 即清空）。
 - 校验只保证「形状合法、有真实依据」，**不保证 LLM 的判断正确**。解释规则新增一条：衍生边是建议性的，回答中要标明「由脚本分析推断，置信度 X」，不得当作确定事实陈述。
 
 ### 6.5 持久化与重建
 
 - 与现有原则一致——「重建从原始元数据重新生成，不从旧图推断」（语义完整性 spec 契约 5）：**标注提交是原始输入，不是图的派生物**。因此推荐把已通过校验的标注写入项目旁的 sidecar 文件（如 `.metadata-checker/annotations/*.json`，可审阅、可入版本库），图是「元数据 + 标注」的派生。
-- 重建 / 全量扫描：先按元数据重建扫描层，再重放 sidecar：脚本 `content_hash` 与标注一致则恢复为 `current`；不一致则标 `stale`，**其衍生边只留在 sidecar、不物化进图**（可由标注命令列出以便重新分析）；但图里要能看出「这个脚本的分析已过期」，否则读图者分不清「分析是最新的、确实没有关系」与「分析已过期」，违背「已知的未知必须在图里」：只要某个 `Script` 有 `stale` 标注，就物化一个 `Script → Diagnostic` 标记（`HasDiagnostic`，`code` 暂名 `SCRIPT_ANALYSIS_STALE`，这是 §3.2「不另造 code」的唯一例外，属标注层，随重新分析成功或 sidecar 删除而消失，不影响扫描层逐边相等），脚本节点消失则对应标注与标记一并移除。
+- 重建 / 全量扫描：先按元数据重建扫描层，再重放 sidecar：脚本 `content_hash` 与标注一致则恢复为 `current`；不一致则标 `stale`，**其衍生边只留在 sidecar、不物化进图**（可由标注命令列出以便重新分析）；但图里要能看出「这个脚本的分析已过期」，否则读图者分不清「分析是最新的、确实没有关系」与「分析已过期」，违背「已知的未知必须在图里」：三种状态在图里都能区分，且都属标注层、随 sidecar 删除而消失（不影响扫描层逐边相等）：①**分析完成且 hash 一致**：该 `Script` 有一个 `ScriptAnalysis` 节点（新节点类型，经 `HasAnalysis` 边挂在 `Script` 上，meta 含 `analyzer`、`script_hash`、`analyzed_at`、`proposal_count`；`proposal_count = 0` 即「分析是最新的、没发现关系」，仍属建议性结论）；②**分析过但脚本已变（`stale`）**：撤下 `ScriptAnalysis` 与衍生边，物化 `Script → Diagnostic` 标记（`HasDiagnostic`，`code` 暂名 `SCRIPT_ANALYSIS_STALE`，这是 §3.2「不另造 code」的唯一例外）；③**从未分析**：什么标记都没有（缺席不代表没有关系，按 `script-may-change-page` 等规则回答）。重新分析成功后②变回①；脚本节点消失则对应标注与标记一并移除。`ScriptAnalysis` / `HasAnalysis` 随 S6 登记进契约表（`layer = inferred`）。
 - 增量扫描：脚本文件变化只影响该 `Script` 的标注（置 `stale`，并从图中撤下对应的衍生边），不触碰其他文件的标注；沿用归属 / 撤销契约（按来源文件记账）。
 - 验收要求：同一份元数据加同一份 sidecar，无论扫描顺序，重建出的图相等；删除全部 sidecar 后扫描层与现在逐边相等（标注层对扫描结果零影响）。
 
@@ -173,4 +173,4 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 6. **`action.ts` 的路径基准**：节点里的路径是相对项目根、相对工作流文件，还是带 `$DATA:` 之类前缀（现有 `.tbl` 引用有这种形式）？决定 `Script` 节点 id 的归一化方式。
 7. **LLM 分析由谁跑**：推荐在工具之外（agent / skill）读脚本，经 `--annotate` 提交；工具不内置模型调用。是否同意？
 8. **标注持久化**：推荐 sidecar 文件为准（§6.5）；备选是只存在图库内。后者在全量重建时会丢标注。
-9. **页面与前端 `.ts` 怎么绑定**：真实语料的页面 JSON 里只有 `scriptFunction`，没有 `.ts` 路径。是约定同名（`合同协议.spg` 对 `合同协议.ts`），还是页面里有别处声明（哪个字段）？需要一个页面加对应 `.ts` 的样例。
+9. **页面与前端 `.ts` 怎么绑定**（2026-10-05 按真实语料补充，**初步观察、尚未端到端核实**）：页面 JSON 里只有 `scriptFunction`，绑定写在 `.ts` 一侧——每个应用目录下一个 `custom.ts`，导出 `CustomJS` 映射，键是页面（**裸文件名** 如 `"首页.spg"`，或**绝对路径**如 `"/xiaoshouyi/app/活动.app/销售活动/二维码/活动留资扫码登记.spg"`），值里的 `CustomActions` 可以是内联对象，也可以引用共享常量（如 `GoMiniPage_CustomActions` 被多个页面共用）。autocrm 上 5 个应用各有一个 `custom.ts`，同一文件内没有重复的裸键，但裸文件名在应用内可能对应多个页面（如两个 `首页.spg`），所以**规则：绝对路径键精确匹配；裸文件名只在应用内恰好一个同名页面时匹配，否则记 `Diagnostic`，不猜**。另有 `public/hooks/custom.ts`，不在应用目录下，像项目级模板，归属待核。需要在计划 S0 里把这些数字核实后再定。
