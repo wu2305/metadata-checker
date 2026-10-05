@@ -76,7 +76,7 @@
 
 - 不改 GQL 引擎、不开 `lpg`（评测与体积实测均无必要）。
 - 不把 `--gql` 加入 stdio / MCP 工具契约（M58 评测固定了工具表面；等本 spec 落地并复评后单独决定）。
-- 不压平 `meta`（评测未证明它是失败原因；schema 固定 `meta` 键集合，日后压平有据可依）。
+- 不整体压平 `meta`（评测未证明它是失败原因；schema 固定 `meta` 键集合，日后压平有据可依）。**例外（2026-10-05 修订，白名单，随 schema v2 / 计划 V2 落地，待用户批准）**：只有下列属性从 `meta` 提升为可过滤的扁平边属性，其余仍在 `meta`——`source_field`（现有 `DependsOn` 等边，值来源闭包按字段过滤要用，见图优先重设计 §3.1）；`confidence`、`analyzer`、`script_hash`（§6.3 的脚本衍生边）。新增扁平属性必须先改这份白名单。
 - 不为「小模型会犯错」重造查询语言；靠 schema 与解释规则，不靠新语法。
 - **不放宽 `--gql` 的只读边界**：LLM 衍生的关系不经 GQL 写入（引擎只读会话与形态闸两道闸原样保留），只经专用的、由契约表校验的提交命令进入（§6.4）。
 - 工具本身不调用 LLM、不联网：脚本分析发生在工具之外（§6），工具只负责校验与存储提交上来的关系。
@@ -105,7 +105,7 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 已在仓库核实的事实：
 
 - 前端（用户 2026-10-02 补充）：前端脚本是后缀为 `.ts` 的独立文件（与后端的 `action.ts` 以后缀区分）；除了操作页面参数、在 action 之间串联逻辑，**脚本还能修改 SuperPage 的内容**（即运行时改组件属性，让页面与静态元数据不一致）。仓库现状：`actionType: "script"` 的 action 已被识别（`src/action_semantics.rs`，分类 `script_execution`），语义摘要写着「具体副作用需人工确认」；真实语料里这类 action 只带 `scriptFunction`（如 `setMsg`，一个页面里有 11 个），**页面 JSON 里看不到指向 `.ts` 文件的路径**。扫描器不为脚本 action 建任何边，也不收录 `.ts` 文件类型。
-- 后端（用户 2026-10-02 答复）：Nashorn 脚本是独立的元数据文件，后缀 `action.ts`；工作流（workflow）节点通过路径链接到它，第三方系统的调用也有路径可作标识。仓库现状：全库没有 Nashorn 样例；`src/parser.rs` 只对「workflow 风格 `nodes`」做浅层组件抽取，扫描器**不扫描**工作流文件，也**不收录** `action.ts` 文件类型。也就是说，两种文件在图里目前都是盲区，S6 要新增两种文件类型的发现与解析（`parser.rs` 注册）。
+- 后端（用户 2026-10-02 答复）：Nashorn 脚本是独立的元数据文件，后缀 `action.ts`；~~工作流（workflow）节点通过路径链接到它~~（2026-10-05 按真实语料更正：`.wfl` 不含任何脚本链接，且 `.wfl` 不解析；实际链接形态见 §6.3），第三方系统的调用也有路径可作标识。仓库现状：全库没有 Nashorn 样例；`src/parser.rs` 只对「workflow 风格 `nodes`」做浅层组件抽取，扫描器**不扫描**工作流文件，也**不收录** `action.ts` 文件类型。也就是说，两种文件在图里目前都是盲区，S6 要新增两种文件类型的发现与解析（`parser.rs` 注册）。
 
 ### 6.2 决定：两类事实，物理上分开
 
@@ -116,12 +116,14 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 | 重建 | 随时从原始元数据重新生成 | **不能**由扫描重新生成；见 §6.5 |
 | 类型 | 现有 22 种边及 S3/S4 新增 | 专用的 `Script*` 边族，**与扫描边类型不相交** |
 
+**层由边类型决定，不由 `origin` 属性决定。** 脚本里能被确定性解析（oxc）推出的关系（[图优先重设计](2026-10-02-graph-first-redesign-design.md) 阶段 5 的层 1）同样是可重建的扫描事实，登记为扫描层的边类型，**与本节的 `Script*` 衍生边族不相交**（具体名字在登记它们的 PR 里定）；`origin=parser` / `origin=llm` 只是来源标注，不是隔离手段，否则 `MATCH ()-[r:ScriptReads]->()` 会把 LLM 的推断当成解析结果。同一种关系两层都可能产生时，是两个不同的边类型；LLM 提交里层 1 已能推出的关系仍按 §6.4 被拒。
+
 **不复用 `Reads` / `ActionWrites` 等扫描边类型。** 否则 `MATCH ()-[r:Reads]->()` 会悄悄混入 LLM 的猜测，读图者无法分辨，且违背「扫描事实可差分验证」。边类型本身就是隔离，不依赖读图者记得加 `WHERE`。
 
 ### 6.3 图形状（契约表新增的行，随 S6 落地）
 
 - 新节点类型 `Script`：脚本本身。id `script:<源文件>|<脚本引用>`；`meta` 含 `kind`（`frontend`：普通 `.ts`；`backend`：`action.ts`，Nashorn）、`content_hash`（脚本文本的 hash）、`entry_names`（已知函数名，如 `setMsg`）。
-- 新**扫描**边（确定性，属于扫描事实）：`ExecutesScript`：`Action → Script`（前端 `script` action，按 `scriptFunction` 在页面绑定的 `.ts` 文件里定位函数；页面与 `.ts` 的绑定规则见 §7 问题 9）；后端：`workflow 节点 → Script` 的链接边（暂名 `LinksScript`）由扫描从工作流元数据里的 `action.ts` 路径确定性地产生；路径解析不到文件时落占位 `Script` 节点并报诊断，不静默丢弃。扫描只负责「这里有一段脚本」，不解读脚本。
+- 新**扫描**边（确定性，属于扫描事实）：`ExecutesScript`：`Action → Script`（前端 `script` action，按 `scriptFunction` 在页面绑定的 `.ts` 文件里定位函数；页面与 `.ts` 的绑定规则见 §7 问题 9）；后端（2026-10-05 按真实语料更正，原先的「workflow 节点按路径指向」不成立）：链接边（暂名 `LinksScript`）由扫描确定性地产生，来源有三种：`.tbl` 数据流的 `Script` 节点按**裸 hash id**（无路径、无后缀）指向脚本，端点 `Model → Script`；`.spg` 的 `webAPI.url` 按路径指向 `.action.ts`，端点 `Action → Script`；脚本之间的 `import`，端点 `Script → Script`；路径解析不到文件时**不造占位 `Script` 节点**（与页面引用的处理一致：不为不存在的文件造节点，PR #9），而是把未解析的脚本标识（裸 hash id 或路径原文）记为一条 `Diagnostic`，用 `HasDiagnostic` 边挂在发出引用的 `Action` / `Model` / `Script`（脚本 `import` 找不到目标时）上，契约表里 `HasDiagnostic` 的合法起点因此包含这三类（诊断入图见[图优先重设计](2026-10-02-graph-first-redesign-design.md) §2.3）；这样 GQL 仍能从发出引用的节点出发查到「它期望哪个脚本、没找到」，不静默丢弃（2026-10-05 修订：原为占位节点，会让 `Script` 计数里混入没有文件的节点）。扫描只负责「这里有一段脚本」，不解读脚本。
 - 新**衍生**边（仅起点为 `Script` 节点，端点必须是图里已存在的节点）：
 
 | 边类型 | 端点 | 含义 |
@@ -137,24 +139,24 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 清单是起点，不是穷举；每增一种都要在契约表加行（`layer = inferred`）并说明「缺席何时不代表没有」。
 
 - 脚本改页面内容使「静态元数据 = 运行时页面」不再成立。契约表解释规则新增 `script-may-change-page`：被 `ScriptModifiesComponent` 指向的组件，其静态属性（显隐、取值、绑定）只是初始状态；没有该边不代表没有脚本改它（脚本分析未做或判断为空），回答要说明这一点。
-- 每条衍生边的**必填属性**：`analyzer`（模型标识 + 提示词版本）、`script_hash`（分析时脚本的 hash）、`confidence`（`high` / `medium` / `low`）、`evidence`（脚本里的原文片段）、`analyzed_at`、`status`（`current` / `stale`）。因为要被 GQL 过滤（`r.status = 'current'`），这些必须是**扁平边属性**，不放进 JSON 文本 `meta`；这也是需要 schema v2（§3.3）的原因之一。
+- 每条衍生边的**必填属性**：`analyzer`（模型标识 + 提示词版本）、`script_hash`（分析时脚本的 hash）、`confidence`（`high` / `medium` / `low`）、`evidence`（脚本里的原文片段；**仅用于校验，不落盘**：提交载荷带原文，校验器核对逐字子串后，图与 sidecar 只保存 `evidence_span`（起止行）与 `evidence_sha256`，不保存片段原文——否则与「不把脚本原文存进图」冲突，且逐字片段可能恰好带出同处的硬编码凭据）、`analyzed_at`。**图里只有 `current` 的衍生边**：脚本 hash 变了的标注（`stale`）只留在 sidecar，不物化成边，所以普通 GQL（`MATCH ()-[r:ScriptReads]->()`）看不到过期内容，不靠调用者记得加谓词；状态与待重新分析的清单由标注命令查看（§6.5）。因为 `confidence`、`analyzer`、`script_hash` 要被 GQL 过滤，这些必须是**扁平边属性**，不放进 JSON 文本 `meta`；这也是需要 schema v2（§3.3）的原因之一。
 
 ### 6.4 提交与校验：不经 GQL 写
 
-- `--gql` 保持只读（引擎只读会话加形态闸，两道闸不动）。写入走专用命令（暂名 `--annotate <file.json>`），载荷是提案列表：`{edge_type, from, to, script_hash, evidence, confidence, analyzer}`。
-- 校验全部由契约表驱动，任何一条不过即**拒收该提案并说明原因**（不静默丢弃、不 `panic!`）：
+- `--gql` 保持只读（引擎只读会话加形态闸，两道闸不动）。写入走专用命令（暂名 `--annotate <file.json>`），载荷以**脚本为单位**：`{script, script_hash, analyzer, proposals: [{edge_type, from, to, evidence, evidence_span, confidence, attrs}]}`（`evidence_span` 是提案自己声明的起止行），`proposals` **可以为空**——分析完成但没发现关系也要提交，用来登记「这个脚本在这个 hash 上分析完成」（见 §6.5 的完成记录）。`attrs` 是**按边类型登记的专属属性**（契约表里每个 `Script*` 行声明自己的必填/可选键，例如 `ScriptModifiesComponent` 必填 `property`，落到 `meta.property`；没有专属属性的边类型 `attrs` 必须为空）。
+- 校验全部由契约表驱动，任何一条不过即**拒收并说明原因**（拒收的粒度是整个脚本级提交，见第 5 条）（不静默丢弃、不 `panic!`）：
   1. `edge_type` 必须是表里 `layer = inferred` 的类型；
   2. 起止节点必须已存在，且类型符合该边的端点组合；起点必须是 `Script` 节点；
-  3. 工具自己重读脚本源码：当前 `content_hash` 必须等于提案声明的 `script_hash`，且 `evidence` 必须是脚本文本的逐字子串（防止 LLM 编造依据）；
-  4. `confidence` 属于枚举；`analyzer` 非空；
-  5. 同一 `(from, to, edge_type, script_hash)` 幂等。
+  3. 工具自己重读脚本源码：当前 `content_hash` 必须等于提案声明的 `script_hash`，且 `evidence` 必须**恰好等于**提案声明的 `evidence_span` 所指的脚本文本（防止 LLM 编造依据；不在全文里搜子串，因为同一片段多次出现时分不清是哪一处，选任意一处会存下错误位置，所以声明的区间对不上就拒收）；通过后图与 sidecar 只留 `evidence_span` 与 `evidence_sha256`，不留原文；
+  4. `confidence` 属于枚举；`analyzer` 非空；每条提案的 `attrs` 键与取值符合该边类型登记的声明（缺必填键或带未登记键即拒收）；
+  5. 幂等键是 `(script_hash, edge_type, from, to, 规范化后的 attrs)`：同一脚本对同一组件的不同属性（`ScriptModifiesComponent` 的 `property` 不同）是不同的事实，不得合并；完全相同的提案重复提交不产生新边。同一脚本的新提交整体替换它此前的标注（按 `script` 与 `script_hash` 覆盖，空 `proposals` 即清空）。**原子性：一次脚本级提交里只要有一条提案校验不过，整个提交都被拒收**，此前的标注与完成记录原样保留，拒收原因逐条列出；否则被接受的子集会删掉此前有效的事实，还会产生一条看起来「分析已完成」的记录。
 - 校验只保证「形状合法、有真实依据」，**不保证 LLM 的判断正确**。解释规则新增一条：衍生边是建议性的，回答中要标明「由脚本分析推断，置信度 X」，不得当作确定事实陈述。
 
 ### 6.5 持久化与重建
 
 - 与现有原则一致——「重建从原始元数据重新生成，不从旧图推断」（语义完整性 spec 契约 5）：**标注提交是原始输入，不是图的派生物**。因此推荐把已通过校验的标注写入项目旁的 sidecar 文件（如 `.metadata-checker/annotations/*.json`，可审阅、可入版本库），图是「元数据 + 标注」的派生。
-- 重建 / 全量扫描：先按元数据重建扫描层，再重放 sidecar：脚本 `content_hash` 与标注一致则恢复为 `current`；不一致则标 `stale` 保留（默认视图排除，可查看以便重新分析），脚本节点消失则对应标注移除。
-- 增量扫描：脚本文件变化只影响该 `Script` 的标注（置 `stale`），不触碰其他文件的标注；沿用归属 / 撤销契约（按来源文件记账）。
+- 重建 / 全量扫描：先按元数据重建扫描层，再重放 sidecar：脚本 `content_hash` 与标注一致则恢复为 `current`；不一致则标 `stale`，**其衍生边只留在 sidecar、不物化进图**（可由标注命令列出以便重新分析）；但图里要能看出「这个脚本的分析已过期」，否则读图者分不清「分析是最新的、确实没有关系」与「分析已过期」，违背「已知的未知必须在图里」：三种状态在图里都能区分，且都属标注层、随 sidecar 删除而消失（不影响扫描层逐边相等）：①**分析完成且 hash 一致**：该 `Script` 有一个 `ScriptAnalysis` 节点（新节点类型，经 `HasAnalysis` 边挂在 `Script` 上，meta 含 `analyzer`、`script_hash`、`analyzed_at`、`proposal_count`；`proposal_count = 0` 即「分析是最新的、没发现关系」，仍属建议性结论）；②**分析过但脚本已变（`stale`）**：撤下 `ScriptAnalysis` 与衍生边，物化 `Script → Diagnostic` 标记（`HasDiagnostic`，`code` 暂名 `SCRIPT_ANALYSIS_STALE`，这是 §3.2「不另造 code」的唯一例外）；③**从未分析**：什么标记都没有（缺席不代表没有关系，按 `script-may-change-page` 等规则回答）。重新分析成功后②变回①；脚本节点消失则对应标注与标记一并移除。`ScriptAnalysis` / `HasAnalysis` 随 S6 登记进契约表（`layer = inferred`）。
+- 增量扫描：脚本文件变化只影响该 `Script` 的标注（置 `stale`，并从图中撤下对应的衍生边），不触碰其他文件的标注；沿用归属 / 撤销契约（按来源文件记账）。
 - 验收要求：同一份元数据加同一份 sidecar，无论扫描顺序，重建出的图相等；删除全部 sidecar 后扫描层与现在逐边相等（标注层对扫描结果零影响）。
 
 ### 6.6 与 S1–S5 的关系
@@ -167,8 +169,8 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 2. **解释规则放哪**：推荐放在 schema 表里随 `--graph-schema` 一起输出（单一真源）；备选是只放 SKILL 文档。
 3. **写入校验的严格度**：推荐导入期违规即报错（fail-visible）；备选是仅在测试中校验、运行期只告警。
 4. **`Diagnostic` 节点是否包含查询期才能算出的诊断**：推荐否（保持图 = 静态事实，查询期诊断仍由查询层给）。
-5. **（已答复一半）** 脚本是独立的 `action.ts` 文件，工作流节点按路径链接；第三方调用「有路径可标识」。还需要：工作流元数据文件的后缀与结构（节点里哪个字段放 `action.ts` 路径？第三方调用路径是写在工作流元数据里、脚本里，还是别处？），以及一个 `action.ts` 样例。有这两个样例才能定 `Script`、`Endpoint` 的 id 文法与扫描规则。
+5. **（已由真实语料部分解决，2026-10-05）** 工作流这条路径不成立（`.wfl` 无脚本链接且不解析），链接形态见 §6.3；下面关于工作流元数据的提问作废，`Endpoint` 的 id 文法仍待定。原文：第三方调用「有路径可标识」。还需要：工作流元数据文件的后缀与结构（节点里哪个字段放 `action.ts` 路径？第三方调用路径是写在工作流元数据里、脚本里，还是别处？），以及一个 `action.ts` 样例。有这两个样例才能定 `Script`、`Endpoint` 的 id 文法与扫描规则。
 6. **`action.ts` 的路径基准**：节点里的路径是相对项目根、相对工作流文件，还是带 `$DATA:` 之类前缀（现有 `.tbl` 引用有这种形式）？决定 `Script` 节点 id 的归一化方式。
 7. **LLM 分析由谁跑**：推荐在工具之外（agent / skill）读脚本，经 `--annotate` 提交；工具不内置模型调用。是否同意？
 8. **标注持久化**：推荐 sidecar 文件为准（§6.5）；备选是只存在图库内。后者在全量重建时会丢标注。
-9. **页面与前端 `.ts` 怎么绑定**：真实语料的页面 JSON 里只有 `scriptFunction`，没有 `.ts` 路径。是约定同名（`合同协议.spg` 对 `合同协议.ts`），还是页面里有别处声明（哪个字段）？需要一个页面加对应 `.ts` 的样例。
+9. **页面与前端 `.ts` 怎么绑定**（2026-10-05 按真实语料补充，**初步观察、尚未端到端核实**）：页面 JSON 里只有 `scriptFunction`，绑定写在 `.ts` 一侧——每个应用目录下一个 `custom.ts`，导出 `CustomJS` 映射，键是页面（**裸文件名** 如 `"首页.spg"`，或**绝对路径**如 `"/xiaoshouyi/app/活动.app/销售活动/二维码/活动留资扫码登记.spg"`），值里的 `CustomActions` 可以是内联对象，也可以引用共享常量（如 `GoMiniPage_CustomActions` 被多个页面共用）。autocrm 上 5 个应用各有一个 `custom.ts`，同一文件内没有重复的裸键，但裸文件名在应用内可能对应多个页面（如两个 `首页.spg`），所以**规则：绝对路径键精确匹配；裸文件名只在应用内恰好一个同名页面时匹配，否则记 `Diagnostic`，不猜**。另有 `public/hooks/custom.ts`，不在应用目录下，像项目级模板，归属待核。需要在计划 S0 里把这些数字核实后再定。
