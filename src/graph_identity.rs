@@ -288,9 +288,35 @@ pub fn id_shape_problem(id: &str) -> Option<&'static str> {
         "model" | "field" | "param" if pipes > 1 => {
             Some("至多一个 `|`（全局名或 `<页面>|<局部名>`）")
         }
-        "page" | "user" | "system" | "comp" | "action" | "model" | "field" | "param" => None,
+        // 局部名（`|` 之后的部分；没有 `|` 时就是 kind 之后的全部）还要有各自的内部结构，
+        // 否则 `field:orders.`（`.tbl` 里 name 为空的维度）会让所有无名维度塌成同一个节点
+        "field" => {
+            let local = rest.split_once('|').map_or(rest, |(_, local)| local);
+            if has_inner_separator(local, b'.') {
+                None
+            } else {
+                Some("应为 `<模型>.<字段>`（`.` 两侧都非空；字段可为 `*`）")
+            }
+        }
+        // 登记的两种形态：`param:<页面路径>|<参数名>`（上面已核两段非空）与
+        // `param:<页面名>/<参数名>`（被引用页面的参数，`/` 两侧非空）。没有 `|` 也没有 `/` 的
+        // 裸 `param:name` 不在 id_formats 里，扫描器也不产生
+        "param" if pipes == 0 && !has_inner_separator(rest, b'/') => {
+            Some("应为 `<页面路径>|<参数名>` 或 `<页面名>/<参数名>`")
+        }
+        // `user:<命名空间>.<名字>`（`$` 之后的部分，如 `user:project.name`）
+        "user" if !has_inner_separator(rest, b'.') => {
+            Some("应为 `<命名空间>.<名字>`（`.` 两侧都非空）")
+        }
+        "page" | "user" | "system" | "comp" | "action" | "model" | "param" => None,
         _ => Some("未知的 kind 前缀"),
     }
+}
+
+/// `text` 里是否存在一个不在首尾的分隔字节（它两侧都至少还有一个字符）。
+fn has_inner_separator(text: &str, separator: u8) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() > 2 && bytes[1..bytes.len() - 1].contains(&separator)
 }
 
 /// A1：判断 id 是否页面局部节点（kind 前缀后带 `|`）。

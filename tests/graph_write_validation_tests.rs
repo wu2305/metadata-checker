@@ -223,6 +223,17 @@ fn node_ids_with_an_empty_or_miscounted_segment_are_rejected() {
         (NodeType::Field, "field:|m.f"),
         (NodeType::Field, "field:app/a.spg|"),
         (NodeType::Field, "param:app/a.spg|"),
+        // 内部结构：field 要 `<模型>.<字段>`，param 要 `|` 或 `/`，user 要 `<命名空间>.<名字>`
+        (NodeType::Field, "field:orders."),
+        (NodeType::Field, "field:.total"),
+        (NodeType::Field, "field:orders"),
+        (NodeType::Field, "field:app/a.spg|flow1."),
+        (NodeType::Field, "field:app/a.spg|flow1"),
+        (NodeType::Field, "param:name"),
+        (NodeType::Field, "param:page/"),
+        (NodeType::Field, "user:name"),
+        (NodeType::Field, "user:project."),
+        (NodeType::Field, "user:.name"),
         (NodeType::Field, "param:|name"),
         (NodeType::Field, "user:"),
         (NodeType::Field, "system:"),
@@ -264,6 +275,9 @@ fn well_formed_node_ids_pass_the_grammar_check() {
         (NodeType::Field, "param:page/p1"),
         (NodeType::Field, "user:project.name"),
         (NodeType::Field, "system:time"),
+        // 模型名本身可以带点：只要求某个 `.` 两侧都非空
+        (NodeType::Field, "field:a.b.c"),
+        (NodeType::Field, "user:user.id"),
         (NodeType::Condition, "cond:app/a.spg|btn#exp#0"),
         (NodeType::Condition, "cond:app/a.spg|btn#a1#conditionExp"),
         (NodeType::Condition, "cond:app/a.spg|flow1#filter#0#exp"),
@@ -315,6 +329,38 @@ fn scan_never_emits_a_component_node_without_an_id() {
     let ids =
         process_spg_file_from_value(&mut store, PAGE, page).expect("缺 id 的组件被解析阶段跳过");
     assert_eq!(ids.iter().any(|id| id.ends_with('|')), false, "{ids:?}");
+}
+
+/// `.tbl` 里 `name` 为空的维度：`validate_table_identities` 认为 `<模型>.` 是非空局部名而放行，
+/// 此前会写出 `field:orders.`，所有无名维度塌成同一个节点。现在写入校验拒收，错误点明
+/// 文件、节点 id 与原因。
+#[test]
+fn tbl_dimension_with_an_empty_name_is_rejected() {
+    let table = serde_json::json!({
+        "properties": {"dbTableName": "fact_orders"},
+        "dimensions": [
+            {"name": "plain", "dbfield": "plain", "dataType": "varchar"},
+            {"name": "", "dbfield": "x", "dataType": "varchar"},
+            {"name": "", "dbfield": "y", "dataType": "varchar"}
+        ]
+    })
+    .to_string();
+    let mut store = MemoryGraphStore::new();
+    let error = process_tbl_file_from_string(&mut store, "app/orders.tbl", &table)
+        .expect_err("无名维度必须让扫描报错");
+    let message = chain(&error);
+    for expected in [
+        "app/orders.tbl",
+        "field:orders.",
+        "id 不符合契约文法",
+        "`<模型>.<字段>`",
+    ] {
+        assert_eq!(
+            message.contains(expected),
+            true,
+            "缺少 {expected}：{message}"
+        );
+    }
 }
 
 // ------------------------------------------------------------ (b) 缺必需 meta
@@ -794,6 +840,44 @@ mod failed_scan_leaves_graph_untouched {
                 .any(|node| node.contains("a_btn_renamed")),
             false,
             "同批合规文件的新内容也不得落库"
+        );
+    }
+
+    /// 无名维度的 `.tbl` 经真实的 `.grafeo` 增量扫描：整批被拒，图与 FileState 原样不动，
+    /// 同批里排在前面的合规文件也不落库；错误点明文件、节点与原因。
+    #[test]
+    fn tbl_with_an_unnamed_dimension_changes_nothing() {
+        let project = Project::new("tbl-empty-name");
+        project.write_src("m.spg", &good("m_btn"));
+        project.scan().expect("首次扫描合规");
+        let before = snapshot(&project.db());
+
+        project.write_src("a_ok.spg", &good("ok_btn"));
+        project.write_src(
+            "orders.tbl",
+            &serde_json::json!({
+                "properties": {"dbTableName": "fact_orders"},
+                "dimensions": [{"name": "", "dbfield": "x", "dataType": "varchar"}]
+            })
+            .to_string(),
+        );
+        let message = format!("{:#}", project.scan().expect_err("无名维度必须让扫描报错"));
+        for expected in [
+            "orders.tbl",
+            "field:orders.",
+            "id 不符合契约文法",
+            "写入校验未通过",
+        ] {
+            assert_eq!(
+                message.contains(expected),
+                true,
+                "缺少 {expected}：{message}"
+            );
+        }
+        assert_eq!(
+            snapshot(&project.db()),
+            before,
+            "失败的扫描不得改动图与文件状态"
         );
     }
 
