@@ -76,7 +76,7 @@
 
 - 不改 GQL 引擎、不开 `lpg`（评测与体积实测均无必要）。
 - 不把 `--gql` 加入 stdio / MCP 工具契约（M58 评测固定了工具表面；等本 spec 落地并复评后单独决定）。
-- 不压平 `meta`（评测未证明它是失败原因；schema 固定 `meta` 键集合，日后压平有据可依）。
+- 不整体压平 `meta`（评测未证明它是失败原因；schema 固定 `meta` 键集合，日后压平有据可依）。**例外（2026-10-05 修订，白名单，随 schema v2 / 计划 V2 落地，待用户批准）**：只有下列属性从 `meta` 提升为可过滤的扁平边属性，其余仍在 `meta`——`source_field`（现有 `DependsOn` 等边，值来源闭包按字段过滤要用，见图优先重设计 §3.1）；`confidence`、`analyzer`、`script_hash`（§6.3 的脚本衍生边）。新增扁平属性必须先改这份白名单。
 - 不为「小模型会犯错」重造查询语言；靠 schema 与解释规则，不靠新语法。
 - **不放宽 `--gql` 的只读边界**：LLM 衍生的关系不经 GQL 写入（引擎只读会话与形态闸两道闸原样保留），只经专用的、由契约表校验的提交命令进入（§6.4）。
 - 工具本身不调用 LLM、不联网：脚本分析发生在工具之外（§6），工具只负责校验与存储提交上来的关系。
@@ -143,19 +143,19 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 
 ### 6.4 提交与校验：不经 GQL 写
 
-- `--gql` 保持只读（引擎只读会话加形态闸，两道闸不动）。写入走专用命令（暂名 `--annotate <file.json>`），载荷是提案列表：`{edge_type, from, to, script_hash, evidence, confidence, analyzer}`。
+- `--gql` 保持只读（引擎只读会话加形态闸，两道闸不动）。写入走专用命令（暂名 `--annotate <file.json>`），载荷是提案列表：`{edge_type, from, to, script_hash, evidence, confidence, analyzer, attrs}`。`attrs` 是**按边类型登记的专属属性**（契约表里每个 `Script*` 行声明自己的必填/可选键，例如 `ScriptModifiesComponent` 必填 `property`，落到 `meta.property`；没有专属属性的边类型 `attrs` 必须为空）。
 - 校验全部由契约表驱动，任何一条不过即**拒收该提案并说明原因**（不静默丢弃、不 `panic!`）：
   1. `edge_type` 必须是表里 `layer = inferred` 的类型；
   2. 起止节点必须已存在，且类型符合该边的端点组合；起点必须是 `Script` 节点；
   3. 工具自己重读脚本源码：当前 `content_hash` 必须等于提案声明的 `script_hash`，且 `evidence` 必须是脚本文本的逐字子串（防止 LLM 编造依据）；通过后图与 sidecar 只留 `evidence_span` 与 `evidence_sha256`，不留原文；
-  4. `confidence` 属于枚举；`analyzer` 非空；
+  4. `confidence` 属于枚举；`analyzer` 非空；`attrs` 的键与取值符合该边类型登记的声明（缺必填键或带未登记键即拒收）；
   5. 同一 `(from, to, edge_type, script_hash)` 幂等。
 - 校验只保证「形状合法、有真实依据」，**不保证 LLM 的判断正确**。解释规则新增一条：衍生边是建议性的，回答中要标明「由脚本分析推断，置信度 X」，不得当作确定事实陈述。
 
 ### 6.5 持久化与重建
 
 - 与现有原则一致——「重建从原始元数据重新生成，不从旧图推断」（语义完整性 spec 契约 5）：**标注提交是原始输入，不是图的派生物**。因此推荐把已通过校验的标注写入项目旁的 sidecar 文件（如 `.metadata-checker/annotations/*.json`，可审阅、可入版本库），图是「元数据 + 标注」的派生。
-- 重建 / 全量扫描：先按元数据重建扫描层，再重放 sidecar：脚本 `content_hash` 与标注一致则恢复为 `current`；不一致则标 `stale`，**只保留在 sidecar、不物化进图**（可由标注命令列出以便重新分析），脚本节点消失则对应标注移除。
+- 重建 / 全量扫描：先按元数据重建扫描层，再重放 sidecar：脚本 `content_hash` 与标注一致则恢复为 `current`；不一致则标 `stale`，**其衍生边只留在 sidecar、不物化进图**（可由标注命令列出以便重新分析）；但图里要能看出「这个脚本的分析已过期」，否则读图者分不清「分析是最新的、确实没有关系」与「分析已过期」，违背「已知的未知必须在图里」：只要某个 `Script` 有 `stale` 标注，就物化一个 `Script → Diagnostic` 标记（`HasDiagnostic`，`code` 暂名 `SCRIPT_ANALYSIS_STALE`，这是 §3.2「不另造 code」的唯一例外，属标注层，随重新分析成功或 sidecar 删除而消失，不影响扫描层逐边相等），脚本节点消失则对应标注与标记一并移除。
 - 增量扫描：脚本文件变化只影响该 `Script` 的标注（置 `stale`，并从图中撤下对应的衍生边），不触碰其他文件的标注；沿用归属 / 撤销契约（按来源文件记账）。
 - 验收要求：同一份元数据加同一份 sidecar，无论扫描顺序，重建出的图相等；删除全部 sidecar 后扫描层与现在逐边相等（标注层对扫描结果零影响）。
 
