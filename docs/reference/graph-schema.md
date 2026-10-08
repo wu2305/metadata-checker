@@ -154,7 +154,7 @@ A script file: a backend Nashorn script (<name>.action.ts) or a project's fronte
   - `entry_names` (array): Frontend only: sorted names of the functions the file exposes to pages (the keys of every CustomActions map in it). Names only, no code.
   - `bindings` (object): Frontend only: the page bindings declared in the file, as { page key: [function names] }. The page key is a bare file name or an absolute path exactly as written in the file's CustomJS map.
   - `imports` (array): Backend only: the import specifiers that are project paths, as written, in source order.
-- notes: The scan lists scripts and links them (ExecutesScript, LinksScript); it does not read what a script does. A script with no further edges is not known to be free of side effects.
+- notes: Registered ahead of the scan: today no Script node and no ExecutesScript / LinksScript edge is written, so their absence says nothing about the project. Once ingestion lands the scan will list scripts and link them, but it will not read what a script does; a script with no further edges is then still not known to be free of side effects.
 
 ## Edge types
 

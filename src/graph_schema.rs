@@ -546,7 +546,7 @@ const NODE_TYPES: &[NodeTypeSchema] = &[
             ),
         ],
         meta_open: false,
-        notes: "The scan lists scripts and links them (ExecutesScript, LinksScript); it does not read what a script does. A script with no further edges is not known to be free of side effects.",
+        notes: "Registered ahead of the scan: today no Script node and no ExecutesScript / LinksScript edge is written, so their absence says nothing about the project. Once ingestion lands the scan will list scripts and link them, but it will not read what a script does; a script with no further edges is then still not known to be free of side effects.",
     },
 ];
 
