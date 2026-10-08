@@ -44,16 +44,6 @@ fn write(project: &Path, rel: &str, content: &str) {
 /// 页 A：内嵌 `ghost.spg`，并有一个带参数的 link 动作指向同一个 `ghost.spg`，
 /// 另有一个 link 动作指向 `b.spg`。`ghost.spg` 是否存在由各用例决定。
 fn page_a() -> String {
-    page_a_with(true)
-}
-
-/// `with_params` 为假时 link 动作不带参数。
-fn page_a_with(with_params: bool) -> String {
-    let params = if with_params {
-        serde_json::json!([{"name": "order_id", "value": "1"}])
-    } else {
-        serde_json::json!([])
-    };
     serde_json::json!({
         "version": "4.19.7",
         "theme": "default",
@@ -66,10 +56,25 @@ fn page_a_with(with_params: bool) -> String {
             {"id": "btn", "type": "button", "actions": [
                 {"id": "go_x", "actionType": "link", "triggerType": "click",
                  "targetType": "app", "path": 0,
-                 "data": params},
+                 "data": [{"name": "order_id", "value": "1"}]},
                 {"id": "go_b", "actionType": "link", "triggerType": "click",
                  "targetType": "app", "path": 1}
             ]}
+        ]}
+    })
+    .to_string()
+}
+
+/// 内嵌 `ref_target` 的页面（`referenceResources[0]`）。
+fn page_embedding(ref_target: &str) -> String {
+    serde_json::json!({
+        "version": "4.19.7",
+        "theme": "default",
+        "params": [],
+        "referenceResources": [ref_target],
+        "sources": [],
+        "canvas": {"id": "canvas", "type": "canvas", "components": [
+            {"id": "embed1", "type": "embedsuperpage", "resPath": "0"}
         ]}
     })
     .to_string()
@@ -290,9 +295,7 @@ fn target_disappearing_turns_the_edge_into_a_diagnostic() {
     for backend in BACKENDS {
         let dir = unique_dir("disappear");
         let project = dir.join("proj");
-        // 不带参数：link 参数节点（`param:`）现在不归任何文件所有，页面重解析清不掉它，
-        // 那是既有的、与目标存在与否无关的问题，不在本用例范围。
-        write(&project, "app/a.spg", &page_a_with(false));
+        write(&project, "app/a.spg", &page_a());
         write(&project, "app/b.spg", &plain_page("B"));
         write(&project, "app/ghost.spg", &plain_page("real"));
         let db = dir.join(backend);
@@ -362,6 +365,66 @@ fn unrelated_page_changes_do_not_reparse_other_files() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// 引用链 C → B → A：改 A 时，B 因 A 重解析，B 的 Page 节点随之被批删，指向 B 的 C 的边
+/// 也要靠重解析 C 补回（传递闭包）。
+#[test]
+fn rewriting_a_page_reparses_referrers_of_referrers() {
+    for backend in BACKENDS {
+        let dir = unique_dir("chain");
+        let project = dir.join("proj");
+        write(&project, "app/a.spg", &plain_page("A 旧"));
+        write(&project, "app/b.spg", &page_embedding("a.spg"));
+        write(&project, "app/c.spg", &page_embedding("b.spg"));
+        let db = dir.join(backend);
+        ProjectIndexer::scan_with_diagnostics(&project, &db).expect("initial scan");
+
+        write(&project, "app/a.spg", &plain_page("A 新"));
+        let report = ProjectIndexer::scan_with_diagnostics(&project, &db).expect("incremental");
+        assert_eq!(
+            report.report.dirty, 3,
+            "{backend}：a 与它的引用者 b、b 的引用者 c"
+        );
+
+        let full = full_snapshot(&project, &dir, backend, "chain-full");
+        assert_same(&format!("{backend} 引用链"), &full, &snapshot(&db));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// 把库改成旧语义版本留下的样子：指纹换成旧版本，并补回旧版本为 `ghost.spg` 留下的占位。
+fn plant_legacy_stubs<S: GraphWriteStore + IndexStateStore>(store: &mut S) {
+    let mut states: HashMap<String, FileState> =
+        IndexStateStore::load_file_states(store).expect("states");
+    for state in states.values_mut() {
+        state.file_hash = state.file_hash.replacen("s3-", "s2-", 1);
+    }
+    let stub = |id: &str, node_type: NodeType, name: &str| Node {
+        id: id.to_string(),
+        node_type,
+        path: "app/ghost.spg".to_string(),
+        name: name.to_string(),
+        meta: None,
+        origin_file: None,
+    };
+    let stubs = [
+        stub("page:app/ghost.spg", NodeType::Page, "ghost"),
+        stub("param:ghost/order_id", NodeType::Field, "order_id"),
+    ];
+    for node in &stubs {
+        store.upsert_node(node.clone()).expect("upsert stub");
+    }
+    let commit = IndexCommit {
+        file_states: states,
+        dirty_nodes: stubs.iter().map(|node| node.id.clone()).collect(),
+        deleted_nodes: Vec::new(),
+        checkpoint: None,
+        delta: None,
+        scanner_entries: Vec::new(),
+        scanner_deleted_paths: Vec::new(),
+    };
+    IndexStateStore::persist_index(store, commit).expect("persist legacy state");
+}
+
 /// 旧语义版本留下的无文件 Page 与目标页名下的参数节点，在升级后的第一次扫描里被清掉，
 /// 结果等于直接全量扫描；之后的扫描不再动它们。
 #[test]
@@ -374,40 +437,7 @@ fn upgrade_scan_sweeps_stubs_left_by_the_previous_scanner_version() {
     ProjectIndexer::scan_with_diagnostics(&project, &db).expect("scan");
     let expected = snapshot(&db);
 
-    // 复原旧版本的库：指纹换成旧语义版本，并补回旧版本为 ghost.spg 留下的占位。
-    {
-        let mut store = GrafeoGraphStore::open(&db).expect("open");
-        let mut states: HashMap<String, FileState> =
-            IndexStateStore::load_file_states(&store).expect("states");
-        for state in states.values_mut() {
-            state.file_hash = state.file_hash.replacen("s3-", "s2-", 1);
-        }
-        let stub = |id: &str, node_type: NodeType, name: &str| Node {
-            id: id.to_string(),
-            node_type,
-            path: "app/ghost.spg".to_string(),
-            name: name.to_string(),
-            meta: None,
-            origin_file: None,
-        };
-        let stubs = [
-            stub("page:app/ghost.spg", NodeType::Page, "ghost"),
-            stub("param:ghost/order_id", NodeType::Field, "order_id"),
-        ];
-        for node in &stubs {
-            store.upsert_node(node.clone()).expect("upsert stub");
-        }
-        let commit = IndexCommit {
-            file_states: states,
-            dirty_nodes: stubs.iter().map(|node| node.id.clone()).collect(),
-            deleted_nodes: Vec::new(),
-            checkpoint: None,
-            delta: None,
-            scanner_entries: Vec::new(),
-            scanner_deleted_paths: Vec::new(),
-        };
-        IndexStateStore::persist_index(&mut store, commit).expect("persist legacy state");
-    }
+    plant_legacy_stubs(&mut GrafeoGraphStore::open(&db).expect("open"));
     assert!(
         snapshot(&db)
             .iter()
@@ -420,5 +450,28 @@ fn upgrade_scan_sweeps_stubs_left_by_the_previous_scanner_version() {
 
     let again = ProjectIndexer::scan_with_diagnostics(&project, &db).expect("no-op scan");
     assert_eq!(again.report.dirty, 0, "升级之后的扫描是空操作");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// diff-refresh 的候选 prepare 路径（redb）同样在升级时清掉旧占位。
+#[test]
+fn upgrade_prepare_sweeps_stubs_left_by_the_previous_scanner_version() {
+    let dir = unique_dir("upgrade-prepare");
+    let project = dir.join("proj");
+    write(&project, "app/a.spg", &page_a());
+    write(&project, "app/b.spg", &plain_page("B"));
+    let db = dir.join("graph.graphdb");
+    ProjectIndexer::scan_with_diagnostics(&project, &db).expect("scan");
+    plant_legacy_stubs(&mut GraphDB::open(&db).expect("open"));
+
+    let prepared = ProjectIndexer::prepare(&project, &db).expect("prepare");
+    let stubs: Vec<String> = prepared
+        .graph
+        .iter_nodes()
+        .expect("iter_nodes")
+        .filter(|node| node.path == "app/ghost.spg")
+        .map(|node| node.id)
+        .collect();
+    assert_eq!(stubs, Vec::<String>::new(), "候选图里不得有旧占位");
     let _ = std::fs::remove_dir_all(&dir);
 }

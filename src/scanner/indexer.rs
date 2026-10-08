@@ -526,7 +526,8 @@ fn page_catalog_of(discovered: &HashSet<String>) -> PageCatalog {
 /// 目标消失，边要换成诊断；目标被改写，批删它的节点会把引用者指向它的边一并删掉，
 /// 而这些边属于引用者、不会自己长回来。引用者是谁，由每个文件的 scanner entry 里
 /// 记下的 `referenced_pages` 反查。旧版本写的 entry 没有这个字段，但语义版本升级后
-/// 所有文件本轮都会重解析，不会漏。
+/// 所有文件本轮都会重解析，不会漏。引用者本身也会被重解析（它的 Page 节点随旧节点
+/// 一起被批删），所以补进来的引用者要继续反查它的引用者，直到没有新增（传递闭包）。
 ///
 /// 解码不出来的 entry 不碰（与 [`stale_scanner_diagnostic_paths`] 同一处理）。
 fn extend_dirty_with_page_referrers(
@@ -536,37 +537,50 @@ fn extend_dirty_with_page_referrers(
     project_dir: &Path,
     discovered: &HashSet<String>,
 ) {
-    let changed_pages: HashSet<&str> = plan
+    let mut changed_pages: HashSet<String> = plan
         .dirty
         .iter()
-        .map(|(rel, _, _)| rel.as_str())
-        .chain(plan.deleted.iter().map(|(rel, _)| rel.as_str()))
+        .map(|(rel, _, _)| rel.clone())
+        .chain(plan.deleted.iter().map(|(rel, _)| rel.clone()))
         .filter(|rel| rel.ends_with(".spg"))
         .collect();
     if changed_pages.is_empty() {
         return;
     }
-    let dirty_paths: HashSet<&str> = plan.dirty.iter().map(|(rel, _, _)| rel.as_str()).collect();
-    let mut referrers: Vec<String> = Vec::new();
-    for (path, bytes) in entries {
-        if dirty_paths.contains(path.as_str()) || !discovered.contains(path.as_str()) {
-            continue;
+    // 只解码一次，下面按轮扫描。
+    let candidates: Vec<(&String, Vec<String>)> = entries
+        .iter()
+        .filter(|(path, _)| discovered.contains(path.as_str()))
+        .filter_map(|(path, bytes)| {
+            let entry = serde_json::from_slice::<FileScanDiagnostics>(bytes).ok()?;
+            (!entry.referenced_pages.is_empty()).then_some((path, entry.referenced_pages))
+        })
+        .collect();
+    // 不动点：被补进来的引用者本身也会被重解析，它的 Page 节点随旧节点一起被批删，
+    // 指向它的边（引用者的引用者所有）同样要靠重解析补回，所以要传递闭包。
+    let mut referrers: HashSet<String> = HashSet::new();
+    loop {
+        let mut grew = false;
+        for (path, referenced) in &candidates {
+            if changed_pages.contains(path.as_str()) {
+                continue;
+            }
+            if referenced
+                .iter()
+                .any(|target| changed_pages.contains(target))
+            {
+                changed_pages.insert((*path).clone());
+                referrers.insert((*path).clone());
+                grew = true;
+            }
         }
-        let Ok(entry) = serde_json::from_slice::<FileScanDiagnostics>(bytes) else {
-            continue;
-        };
-        if entry
-            .referenced_pages
-            .iter()
-            .any(|target| changed_pages.contains(target.as_str()))
-        {
-            referrers.push(path.clone());
+        if !grew {
+            break;
         }
     }
     if referrers.is_empty() {
         return;
     }
-    let referrers: HashSet<String> = referrers.into_iter().collect();
     // 沿用文件发现的顺序，保持扫描序确定
     let extra: Vec<DirtyFile> = files
         .iter()
@@ -603,6 +617,34 @@ fn legacy_ghost_stub_ids(
         }
     }
     Ok(ghosts)
+}
+
+/// 目标页面被删后留下的孤儿 link 参数节点：`param:` 节点的 path 是目标页，且不归任何
+/// 文件所有（不在 `FileState.node_ids` 里），引用者重解析和目标删除都清不掉它。
+/// 只清「路径已不是本次发现的文件」**且已没有任何边**的：不同目录里的同名页面共用
+/// `param:<页面名>/<参数>`，其中一个被删后另一个的引用者可能仍然连着它，那种不能删。
+fn orphan_param_ids(
+    store: &dyn IndexScanStore,
+    discovered: &HashSet<String>,
+) -> Result<Vec<String>> {
+    let mut orphans = Vec::new();
+    for node in store.iter_nodes().map_err(|err| anyhow!("{err}"))? {
+        if node.node_type != NodeType::Field
+            || !node.id.starts_with("param:")
+            || discovered.contains(&node.path.replace('\\', "/"))
+        {
+            continue;
+        }
+        let neighbors = store
+            .get_node_edges(&node.id)
+            .map_err(|err| anyhow!("{err}"))?;
+        let has_edges =
+            neighbors.is_some_and(|views| !views.outgoing.is_empty() || !views.incoming.is_empty());
+        if !has_edges {
+            orphans.push(node.id);
+        }
+    }
+    Ok(orphans)
 }
 
 /// 把本轮删除文件的路径与对账出的陈旧诊断路径合并去重。
@@ -953,13 +995,15 @@ impl ProjectIndexer {
     }
 
     /// 同 [`Self::apply_incremental_changes`]，另给出本次扫描发现的页面集合：
-    /// 目标文件不在集合里的跨页引用不建边、不造 Page 节点。
+    /// 目标文件不在集合里的跨页引用不建边、不造 Page 节点。`extra_removed` 是不归任何
+    /// 文件所有、要随这一批一并删掉的节点（旧版本留下的占位）。
     pub fn apply_incremental_changes_in_catalog(
         graph: &mut dyn GraphWriteStore,
         new_states: &mut HashMap<String, FileState>,
         updates: &[ParsedGraphUpdate],
         deleted: &[DeletedFile],
         catalog: &PageCatalog,
+        extra_removed: &[String],
     ) -> Result<HashMap<String, Vec<String>>> {
         Self::apply_changes(
             graph,
@@ -967,7 +1011,7 @@ impl ProjectIndexer {
             updates,
             deleted,
             Some(catalog),
-            &[],
+            extra_removed,
             true,
         )
     }
@@ -1357,6 +1401,13 @@ impl ProjectIndexer {
                         }
                         Err(error) => return Err(error),
                     };
+                    // 页面被删后，它名下的 link 参数节点没有主人，这里补清。
+                    if plan.deleted.iter().any(|(rel, _)| rel.ends_with(".spg")) {
+                        let orphans = orphan_param_ids(&*store, &discovered)?;
+                        if !orphans.is_empty() {
+                            store.remove_nodes_by_ids(&orphans)?;
+                        }
+                    }
                     // M56：apply 后收集新增/变更节点的 incident edges
                     let new_node_ids: Vec<String> = parsed_nodes
                         .values()
@@ -1540,6 +1591,12 @@ impl ProjectIndexer {
             project_dir,
             &discovered,
         );
+        // 与 scan 同一套：旧语义版本留下的无文件占位随升级后的第一轮清掉。
+        let legacy_ghost_stubs = if ownership_enabled {
+            Vec::new()
+        } else {
+            legacy_ghost_stub_ids(&graph, &prev_states, &discovered)?
+        };
 
         // M59 codex 复审返修：与 scan 同一套对账（prepare 不落盘，路径随
         // PreparedIndexUpdate 透传给编排器）。
@@ -1593,7 +1650,8 @@ impl ProjectIndexer {
                 updates
                     .iter()
                     .map(|update| update.previous_node_ids.as_slice())
-                    .chain(plan.deleted.iter().map(|(_, node_ids)| node_ids.as_slice())),
+                    .chain(plan.deleted.iter().map(|(_, node_ids)| node_ids.as_slice()))
+                    .chain(std::iter::once(legacy_ghost_stubs.as_slice())),
             );
             let removed_edge_keys = collect_incident_edge_keys(&graph, &merged_removed);
             // dirty previous IDs 与 deleted IDs 合并去重后只做一次图批删（与 scan 一致）
@@ -1603,7 +1661,15 @@ impl ProjectIndexer {
                 &updates,
                 &plan.deleted,
                 &catalog,
+                &legacy_ghost_stubs,
             )?;
+            // 页面被删后，它名下的 link 参数节点没有主人，这里补清（与 scan 同一套）。
+            if plan.deleted.iter().any(|(rel, _)| rel.ends_with(".spg")) {
+                let orphans = orphan_param_ids(&graph, &discovered)?;
+                if !orphans.is_empty() {
+                    GraphWriteStore::remove_nodes_by_ids(&mut graph, &orphans)?;
+                }
+            }
             // M56：apply 后收集新增/变更节点的 incident edges
             let new_node_ids: Vec<String> = parsed_nodes
                 .values()
