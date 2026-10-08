@@ -75,7 +75,7 @@ A table field, or a non-table symbol: a page parameter, a user property or a sys
   - `dataType` (string): Field data type.
   - `dbfield` (string): Physical column name.
   - `isDimension` (bool): Whether the field is a dimension.
-  - `length` (number): Declared length.
+  - `length` (number or null): Declared length; null on some dimensions copied from a page-embedded dataflow.
   - `description` (string): Field description.
   - `inputField` (string): Dataflow: upstream input field.
   - `source_input_field` (string): Dataflow: upstream input field (source form).

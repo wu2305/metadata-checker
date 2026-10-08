@@ -21,7 +21,7 @@
 //! `docs/plans/2026-09-06-m59-grafeo-implementation-plan.md`。
 
 use crate::diff_refresh::DiffRefreshCheckpoint;
-use crate::graph::{Edge, FileState, Node};
+use crate::graph::{Edge, FileState, Node, NodeType};
 use crate::graph_store::{
     EdgeFactKey, GqlError, GqlRows, GraphEdgeView, GraphNeighbors, GraphReadStore, GraphStoreError,
     GraphStoreResult, GraphWriteStore, IndexCommit, IndexReport, IndexStateStore, edge_dedup_key,
@@ -715,6 +715,24 @@ impl GraphWriteStore for GrafeoGraphStore {
             !removed.contains(from.as_str()) && !removed.contains(to.as_str())
         });
         Ok(())
+    }
+
+    fn node_type_of(&self, node_id: &str) -> GraphStoreResult<Option<NodeType>> {
+        let Some(&node) = self.node_ids.get(node_id) else {
+            return Ok(None);
+        };
+        // 只读 node_type 一个属性：不走 `get_node`，免得为一次类型查询解析整份 meta。
+        let session = self.db.session();
+        let Some(raw) = session.get_node(node) else {
+            return Err(GraphStoreError::Corrupted {
+                reason: format!("id 映射指向不存在的 grafeo 节点：{node_id}"),
+            });
+        };
+        let name = read_text(|key: &str| raw.get_property(key).cloned(), PROP_NODE_TYPE)
+            .ok_or_else(|| GraphStoreError::Corrupted {
+                reason: format!("grafeo 节点 {node_id} 缺少 {PROP_NODE_TYPE} 属性"),
+            })?;
+        Ok(Some(enum_from_name(&name)?))
     }
 }
 

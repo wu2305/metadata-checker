@@ -253,6 +253,95 @@ pub fn parse_node_id(id: &str) -> Option<ParsedNodeId> {
     }
 }
 
+/// 写入校验用的完整 id 文法检查：id 形如 `<kind>:<段>[|<段>…]`，返回 `None` 表示合规，
+/// 否则返回问题的稳定描述（合规路径不分配）。
+///
+/// 与上面的构造 / 解析函数同一份约定（竖线分隔作用域、各段非空），再按 kind 补上各自要求的
+/// 段数：`page` / `user` / `system` 无竖线；`comp` / `cond` 恰好 `<页面>|<局部名>` 两段；
+/// `action` 恰好 `<页面>|<组件>|<动作>` 三段；`model` / `field` / `param` 是全局名（一段）或页面
+/// 局部名（两段）。`cond` 的局部名再按 `#` 切分，同样不得有空段。任何一段为空——例如
+/// SPG 里缺 id 的组件或动作拼出的 `comp:page.spg|`——都不合规：空段会让多个缺 id 的元素塌成同一个节点。
+pub fn id_shape_problem(id: &str) -> Option<&'static str> {
+    let Some((kind, rest)) = id.split_once(':') else {
+        return Some("缺少 kind 前缀");
+    };
+    if rest.split('|').any(str::is_empty) {
+        return Some("含空段（kind 之后、`|` 两侧都不得为空）");
+    }
+    let pipes = rest.bytes().filter(|byte| *byte == b'|').count();
+    match kind {
+        "page" | "user" | "system" if pipes != 0 => Some("该类型的 id 不应含 `|`"),
+        "comp" if pipes != 1 => Some("应为 `<页面>|<组件 id>` 两段"),
+        "action" if pipes != 2 => Some("应为 `<页面>|<组件 id>|<动作 id>` 三段"),
+        "cond" if pipes != 1 => Some("应为 `<页面>|<条件局部名>` 两段"),
+        "cond" => cond_local_problem(rest.split_once('|').map_or("", |(_, local)| local)),
+        "model" | "field" | "param" if pipes > 1 => {
+            Some("至多一个 `|`（全局名或 `<页面>|<局部名>`）")
+        }
+        // 局部名（`|` 之后的部分；没有 `|` 时就是 kind 之后的全部）还要有各自的内部结构，
+        // 否则 `field:orders.`（`.tbl` 里 name 为空的维度）会让所有无名维度塌成同一个节点
+        "field" => {
+            let local = rest.split_once('|').map_or(rest, |(_, local)| local);
+            if has_inner_separator(local, b'.') {
+                None
+            } else {
+                Some("应为 `<模型>.<字段>`（`.` 两侧都非空；字段可为 `*`）")
+            }
+        }
+        // 登记的两种形态：`param:<页面路径>|<参数名>`（上面已核两段非空）与
+        // `param:<页面名>/<参数名>`（被引用页面的参数，`/` 两侧非空）。没有 `|` 也没有 `/` 的
+        // 裸 `param:name` 不在 id_formats 里，扫描器也不产生
+        "param" if pipes == 0 && !has_inner_separator(rest, b'/') => {
+            Some("应为 `<页面路径>|<参数名>` 或 `<页面名>/<参数名>`")
+        }
+        // `user:<命名空间>.<名字>`（`$` 之后的部分，如 `user:project.name`）
+        "user" if !has_inner_separator(rest, b'.') => {
+            Some("应为 `<命名空间>.<名字>`（`.` 两侧都非空）")
+        }
+        "page" | "user" | "system" | "comp" | "action" | "model" | "param" => None,
+        _ => Some("未知的 kind 前缀"),
+    }
+}
+
+/// 条件 id 的局部名（`|` 之后的部分）。**从右往左**认固定后缀，属主部分不设限：
+/// SPG 里的 source id / 组件 id / 动作 id 本身可以含 `#`，按 `#` 切成固定段数会把这种合法页面拒掉。
+///
+/// 三种后缀形态（见 `conditions.rs` 的 `condition_id` 构造）：
+/// - `<属主>#filter#<n>#exp` / `…#clause`：模型过滤条件，`<n>` 是数字，`<属主>`（source id）非空；
+/// - `<组件>#<动作>#conditionExp` / `…#condition`：动作条件，组件与动作都非空；
+/// - `<组件>#<属性>#<序号>`：组件表达式，序号是数字，组件与属性都非空。
+fn cond_local_problem(local: &str) -> Option<&'static str> {
+    const SHAPE: Option<&str> = Some(
+        "条件局部名应为 `<source>#filter#<n>#exp|clause`、`<组件>#<动作>#conditionExp|condition` 或 `<组件>#<属性>#<序号>`，各部分非空",
+    );
+    let is_number = |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit());
+    let non_empty_pair = |text: &str| {
+        text.rsplit_once('#')
+            .is_some_and(|(left, right)| !left.is_empty() && !right.is_empty())
+    };
+    let Some((head, tail)) = local.rsplit_once('#') else {
+        return SHAPE;
+    };
+    let valid = match tail {
+        "exp" | "clause" => head.rsplit_once('#').is_some_and(|(owner_filter, number)| {
+            is_number(number)
+                && owner_filter
+                    .rsplit_once('#')
+                    .is_some_and(|(owner, marker)| marker == "filter" && !owner.is_empty())
+        }),
+        "conditionExp" | "condition" => non_empty_pair(head),
+        number if is_number(number) => non_empty_pair(head),
+        _ => false,
+    };
+    if valid { None } else { SHAPE }
+}
+
+/// `text` 里是否存在一个不在首尾的分隔字节（它两侧都至少还有一个字符）。
+fn has_inner_separator(text: &str, separator: u8) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() > 2 && bytes[1..bytes.len() - 1].contains(&separator)
+}
+
 /// A1：判断 id 是否页面局部节点（kind 前缀后带 `|`）。
 pub fn is_page_scoped_id(id: &str) -> bool {
     parse_node_id(id).is_some_and(|parsed| parsed.page.is_some())

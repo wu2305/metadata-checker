@@ -219,6 +219,10 @@ impl GraphWriteStore for MemoryGraphStore {
         });
         Ok(())
     }
+
+    fn node_type_of(&self, node_id: &str) -> GraphStoreResult<Option<crate::graph::NodeType>> {
+        Ok(self.nodes.get(node_id).map(|node| node.node_type.clone()))
+    }
 }
 
 impl IndexStateStore for MemoryGraphStore {

@@ -5,10 +5,12 @@
 //! - 测试侧：`tests/graph_schema_tests.rs` 在扫描出的真实图上逐元素核对；
 //!   `docs/reference/graph-schema.md` 由 [`to_markdown`] 生成并比对漂移。
 //!
-//! 本批（S1）只**记录现状**，不改图结构，也不在写入路径上校验。表里的端点组合与
-//! `meta` 键来自夹具图实测加 `scanner/` 写入点核对；`required = true` 仅用于写入点
-//! 无条件构造的键（Action、Condition 的 `meta`）。S2 在启用写入校验前必须逐写入点
-//! 复核端点组合，不能直接把夹具观测当成穷举。
+//! S1 只**记录现状**，不改图结构。表里的端点组合与 `meta` 键来自夹具图实测加 `scanner/`
+//! 写入点核对；`required = true` 仅用于写入点无条件构造的键（Action、Condition 的 `meta`）。
+//!
+//! S2（计划步 L0）把表接到写入路径上：[`node_violations`] / [`edge_violations`] 是**唯一**的
+//! 判定实现，写入守卫（`graph_write_guard.rs`）在每次写入前调用，整图一致性测试
+//! （`tests/graph_schema_tests.rs`）对已落库的图逐元素调用同一对函数，两处不会各抄一份规则。
 //!
 //! 表的形状：每个节点类型有 id 文法、`meta` 键（名 + JSON 类型 + 是否可空 + 含义，`meta_open`
 //! 的行允许出现未列出的键）；每种边有端点组合、`field_path` 语义、`meta` 键、**产生它的写入路径与规则**
@@ -23,9 +25,9 @@
 //! 与存储层版本无关：[`GRAPH_SCHEMA_CONTRACT_VERSION`] 描述本契约，不是 redb 的
 //! `fact_schema_version`；S3 引入图内新事实时才会递增。
 
-use crate::graph::{EdgeType, NodeType};
+use crate::graph::{Edge, EdgeType, Node, NodeType};
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::fmt::Write as _;
 
 /// 契约版本。S3（字段级血缘边）与 S4（诊断入图）会让它变成 2。
@@ -365,7 +367,7 @@ const NODE_TYPES: &[NodeTypeSchema] = &[
             opt("dataType", Str, "Field data type."),
             opt("dbfield", Str, "Physical column name."),
             opt("isDimension", Bool, "Whether the field is a dimension."),
-            opt("length", Number, "Declared length."),
+            opt("length", Number, "Declared length; null on some dimensions copied from a page-embedded dataflow.").nullable(),
             opt("description", Str, "Field description."),
             opt("inputField", Str, "Dataflow: upstream input field."),
             opt(
@@ -1293,6 +1295,182 @@ impl MetaValueType {
 /// 边 / 节点类型在图里的名字（即枚举变体名）。
 pub fn variant_name(value: &impl std::fmt::Debug) -> String {
     format!("{value:?}")
+}
+
+// ---------------------------------------------------------------- 写入校验的判定规则
+
+/// 一组 `meta` 键值相对契约键表的违规：未声明的键（开放 meta 除外）、值类型不符、
+/// 不允许 null 的键为 null。`owner` 是违规信息里指代该元素的文字。
+pub fn meta_violations(
+    owner: &str,
+    declared: &[MetaKeySchema],
+    open: bool,
+    actual: &Map<String, Value>,
+) -> Vec<String> {
+    meta_violations_with(&|| owner.to_string(), declared, open, actual)
+}
+
+/// 同 [`meta_violations`]，但 `owner` 只在真的有违规时才拼出来：写入校验每次扫描都会
+/// 对几十万个元素调用，合规的常见情形不该为一条没人读的文字分配内存。
+fn meta_violations_with(
+    owner: &dyn Fn() -> String,
+    declared: &[MetaKeySchema],
+    open: bool,
+    actual: &Map<String, Value>,
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    for (name, value) in actual {
+        let Some(key) = declared.iter().find(|candidate| candidate.name == name) else {
+            if !open {
+                violations.push(format!("{} 的 meta 键未声明：{name}", owner()));
+            }
+            continue;
+        };
+        if value.is_null() {
+            if !key.nullable {
+                violations.push(format!("{} 的 meta 键 {name} 为 null，契约不允许", owner()));
+            }
+        } else if !key.value_type.accepts(value) {
+            violations.push(format!(
+                "{} 的 meta 键 {name} 类型不符：契约 {}，实际 {value}",
+                owner(),
+                key.value_type.as_str()
+            ));
+        }
+    }
+    violations
+}
+
+/// `meta` 整体相对契约键表的违规：不是 JSON 对象、键与值类型不符、缺必需键。
+///
+/// `skip_required` 为真时不核必需键（写入方没带 meta 而节点已存在，存储会沿用既有 meta）。
+fn meta_shape_violations(
+    owner: &dyn Fn() -> String,
+    declared: &[MetaKeySchema],
+    open: bool,
+    meta: Option<&Value>,
+    skip_required: bool,
+) -> Vec<String> {
+    static EMPTY: std::sync::OnceLock<Map<String, Value>> = std::sync::OnceLock::new();
+    let (object, mut violations) = match meta {
+        // JSON null 与「没有 meta」同义（Grafeo 把缺省 meta 存成 null）
+        None | Some(Value::Null) => (EMPTY.get_or_init(Map::new), Vec::new()),
+        Some(Value::Object(object)) => (object, Vec::new()),
+        // 不是对象的 meta 没有键可言：先报形态，再按「空对象」核必需键
+        Some(other) => (
+            EMPTY.get_or_init(Map::new),
+            vec![format!("{} 的 meta 不是 JSON 对象：{other}", owner())],
+        ),
+    };
+    violations.extend(meta_violations_with(owner, declared, open, object));
+    if !skip_required {
+        for key in declared.iter().filter(|key| key.required) {
+            if !object.contains_key(key.name) {
+                violations.push(format!("{} 缺少必需 meta 键：{}", owner(), key.name));
+            }
+        }
+    }
+    violations
+}
+
+/// 一个节点相对契约表的违规（空表示合规）：类型未登记、id 前缀不在契约内、`meta` 键与
+/// 值类型不符、缺必需 `meta` 键。
+///
+/// `inherits_meta`：写入方没带 `meta`、而该节点已在图里时，存储沿用既有 `meta`
+/// （`graph_store::merge_upsert_meta` 规则 1），这种写入不核必需键；其余情形一律核。
+pub fn node_violations(schema: &GraphSchema, node: &Node, inherits_meta: bool) -> Vec<String> {
+    let Some(row) = schema.node_row(&node.node_type) else {
+        return vec![format!(
+            "节点类型未登记：{}（{}）",
+            variant_name(&node.node_type),
+            node.id
+        )];
+    };
+    let owner = || format!("{} 节点 {}", variant_name(&node.node_type), node.id);
+    let mut violations = Vec::new();
+    let prefix = node.id.split(':').next().unwrap_or_default();
+    if !row.id_prefixes.contains(&prefix) {
+        violations.push(format!(
+            "{} 节点的 id 前缀不在契约内：{}",
+            variant_name(&node.node_type),
+            node.id
+        ));
+    } else if let Some(problem) = crate::graph_identity::id_shape_problem(&node.id) {
+        // 前缀对了再核文法：缺 id 的组件会拼出 `comp:page.spg|`，前缀合法但违反 id_formats
+        violations.push(format!(
+            "{} 节点的 id 不符合契约文法（{problem}）：{}",
+            variant_name(&node.node_type),
+            node.id
+        ));
+    }
+    violations.extend(meta_shape_violations(
+        &owner,
+        row.meta_keys,
+        row.meta_open,
+        node.meta.as_ref(),
+        inherits_meta && node.meta.is_none(),
+    ));
+    violations
+}
+
+/// 一条边相对契约表的违规（空表示合规）：边类型未登记、契约声明不会产生的边、端点类型
+/// 组合不在契约内、`field_path` 与约定不符、`meta` 键与值类型不符、缺必需 `meta` 键。
+///
+/// `from_type` / `to_type` 是两端节点的类型；某一端解析不到（`None`）时跳过端点组合核对
+/// ——写入路径上端点不存在的边本来就会被存储丢弃，没有东西落盘；整图核对时两端必然都在。
+pub fn edge_violations(
+    schema: &GraphSchema,
+    edge: &Edge,
+    from_type: Option<&NodeType>,
+    to_type: Option<&NodeType>,
+) -> Vec<String> {
+    let Some(row) = schema.edge_row(&edge.edge_type) else {
+        return vec![format!(
+            "边类型未登记：{}（{} -> {}）",
+            variant_name(&edge.edge_type),
+            edge.from,
+            edge.to
+        )];
+    };
+    let owner = || {
+        format!(
+            "{}（{} -> {}）",
+            variant_name(&edge.edge_type),
+            edge.from,
+            edge.to
+        )
+    };
+    if !row.emitted {
+        return vec![format!("契约声明不会产生的边出现了：{}", owner())];
+    }
+    let mut violations = Vec::new();
+    if let (Some(from), Some(to)) = (from_type, to_type)
+        && !row
+            .endpoints
+            .iter()
+            .any(|pair| &pair.from == from && &pair.to == to)
+    {
+        violations.push(format!(
+            "{} 的端点组合不在契约内：{} -> {}",
+            owner(),
+            variant_name(from),
+            variant_name(to)
+        ));
+    }
+    match (row.field_path, edge.field_path.is_some()) {
+        (FieldPathUse::Never, true) => violations.push(format!("{} 不该有 field_path", owner())),
+        (FieldPathUse::Always, false) => violations.push(format!("{} 缺少 field_path", owner())),
+        // Sometimes：取决于端点组合，行内说明；不逐边判
+        _ => {}
+    }
+    violations.extend(meta_shape_violations(
+        &owner,
+        row.meta_keys,
+        false,
+        edge.meta.as_ref(),
+        false,
+    ));
+    violations
 }
 
 /// `--graph-schema` 的 JSON 输出：契约表本身的序列化，没有手写副本。

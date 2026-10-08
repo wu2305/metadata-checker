@@ -1,6 +1,7 @@
 use super::{add_edge_with_meta, add_node};
 use crate::graph::{EdgeType, NodeType};
 use crate::graph_store::GraphWriteStore;
+use crate::graph_write_guard::SchemaGuard;
 use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
 use std::path::Path;
@@ -10,6 +11,23 @@ pub fn process_tbl_file_from_string(
     rel_path: &str,
     content: &str,
 ) -> Result<Vec<String>> {
+    process_tbl_file_with_schema(graph, rel_path, content, crate::graph_schema::schema())
+}
+
+/// 同 [`process_tbl_file_from_string`]，但写入校验对照指定的契约表（用途同
+/// `process_spg_file_with_schema`：让测试能对整条扫描路径验证违规被拒收）。
+///
+/// L0 写入校验：本文件写出的每个节点和边先过 [`SchemaGuard`]，违规即返回错误
+/// （含文件、节点或边、原因），不转发给存储。
+pub fn process_tbl_file_with_schema(
+    graph: &mut dyn GraphWriteStore,
+    rel_path: &str,
+    content: &str,
+    schema: &crate::graph_schema::GraphSchema,
+) -> Result<Vec<String>> {
+    let mut guard = SchemaGuard::with_schema(graph, schema, rel_path);
+    // 遮蔽入参：下面的函数体原样使用 `graph`，写入全部经过守卫
+    let graph: &mut dyn GraphWriteStore = &mut guard;
     let mut node_ids = std::collections::HashSet::new();
     // M59-B3：空内容与非法 JSON 曾各自 `return Ok(空集)`。调用方无从分辨
     // 「这个表没有任何模型」和「这个文件根本没读出来」，而两者在先删后建的
