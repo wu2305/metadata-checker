@@ -210,6 +210,12 @@ fn node_ids_with_an_empty_or_miscounted_segment_are_rejected() {
         // 脚本 id 只有一段路径：空路径与带 `|` 的 id 都不是登记形态
         (NodeType::Script, "script:"),
         (NodeType::Script, "script:app/a.action.ts|run"),
+        // 路径必须归一化、相对项目根，且是脚本源文件：编译副本和其它 .ts 都不是节点
+        (NodeType::Script, "script:/tmp/a.action.ts"),
+        (NodeType::Script, "script:../a.action.ts"),
+        (NodeType::Script, "script:app/./a.action.ts"),
+        (NodeType::Script, "script:app/a.action"),
+        (NodeType::Script, "script:app/clientscript.ts"),
         (NodeType::Component, "comp:app/a.spg|"),
         (NodeType::Component, "comp:|btn"),
         (NodeType::Component, "comp:app/a.spg"),
