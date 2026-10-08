@@ -3,7 +3,7 @@
 > 状态：**draft**（待用户批准；批准前不写实现代码）
 > 上位 spec：[图优先重设计](../specs/2026-10-02-graph-first-redesign-design.md)（draft，PR #6）
 > 方向来源：2026-10-03 用户在决策卡上选「Both, parallel」，并说明最关心**数据处理逻辑与数据库操作逻辑**
-> 已完成的前置（均已合入 `main`）：PR #5（`graph_schema.rs` 契约表与 `--graph-schema`）、PR #8（扫描诊断逐次记录）、PR #9（阶段 1.0 的ⓐ、ⓑ：空 `dbTableName` 与跨页引用解析；ⓒ、ⓓ未完成，见 L0b）、PR #10（契约表补 `landed` 与 `IndexState` 记录形态）
+> 已完成的前置（均已合入 `main`）：PR #5（`graph_schema.rs` 契约表与 `--graph-schema`）、PR #8（扫描诊断逐次记录）、PR #9（阶段 1.0 的ⓐ、ⓑ：空 `dbTableName` 与跨页引用解析；ⓒ 由 L0b 完成，ⓓ 待用户答复）、PR #10（契约表补 `landed` 与 `IndexState` 记录形态）
 
 ## 0. 做什么、不做什么
 
@@ -24,7 +24,7 @@
 | 步 | 内容 | 门禁 |
 |----|------|------|
 | L0 | **写入校验**（PR #4 的 S2；spec 阶段 1 ① 要求它先于新图形状）：契约表现在只描述不拦截，新增的血缘边、诊断节点、脚本节点边若没有它，端点错误、缺必填元信息或未登记的形状都能落盘。让写入路径对照 `graph_schema.rs` 拒收违规项并说明原因（不静默丢弃） | 对每类违规（端点类型不符、缺必填 meta、未登记的边/节点类型）各有拒收测试；**L1、L2、L3、L4、S1 起的新增类型都以它为前提** |
-| L0b | **幽灵 Page 收尾**（spec 阶段 1.0 ⓒ）：解析正确但目标文件不存在的页面引用（autocrm 上 7 个）不再留无文件的 Page 节点，改为 `SCANNER_UNRESOLVED_REFERENCE`（入图后按 L3 成为 `Diagnostic`）；判定用本次发现的文件集合 | autocrm 上每个 `Page` 节点都对应磁盘文件；夹具快照不变；增量/全量逐属性相等 |
+| L0b | **幽灵 Page 收尾**（spec 阶段 1.0 ⓒ；**已实现**）：解析正确但目标文件不存在的页面引用（autocrm 上 7 个）不再留无文件的 Page 节点，改为 `SCANNER_UNRESOLVED_REFERENCE`（入图后按 L3 成为 `Diagnostic`）；判定用本次发现的文件集合 | autocrm 上每个 `Page` 节点都对应磁盘文件；夹具快照不变；增量/全量逐属性相等 |
 | V2 | **schema v2：扁平边属性**（契约设计 §3.3 的版本拒载，加 §4 修订后的**扁平属性白名单**：`source_field`、`confidence`、`analyzer`、`script_hash`，其余仍在 `meta`；该白名单修订随本 PR 一起待批准，批准前 V2 不开工）。现在 Grafeo 边只落 `field_path`、JSON 文本 `meta`、`origin_file`（`graph_grafeo.rs` 的 `PROP_*`），L2 要按字段过滤的 `source_field`、S3 要的 `confidence` / `analyzer` / `script_hash` 都进不了可过滤的位置。内容：边模型加扁平属性、存储版本键与旧版拒绝（重建即迁移，但不得悄悄读旧库）、序列化、GQL 与 `--graph-schema` 暴露 | 夹具上 `WHERE r.confidence = 'high'`、`WHERE r.source_field = ...` 可直接过滤；旧版存储被明确拒绝并提示重建；B5 逐属性相等 |
 | L1 | `action_kind`（动作类型）、`eval_mode`（取值模式）、循环标记入图 | 夹具上 `--explain` 的对应 fact block 可由 GQL 复现；B5 全量/增量逐属性相等 |
 | L2 | 血缘边 `DerivesFrom`，带 `confidence` / `transform` / `lineage_kind`（借用 OpenLineage 的 `DIRECT` / `INDIRECT`，值域实现时对照现有 `transform` 文本）**以及现有 `--explain` 血缘已有的 `via_node` 与证据 `json_path`**（少了这两项，GQL 使用者就找不到中间节点和证据位置，比现在更不可信）。**依赖 V2**：值来源闭包要按字段追，`source_field` 必须是可过滤的边属性 | 同上，且对等门禁逐项比对 `via_node` / `json_path`；真实语料上边数与抽样核对 |

@@ -5,10 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use twox_hash::XxHash64;
 
-use super::{
-    process_spg_file_from_value, process_spg_file_from_value_with_identity,
-    process_tbl_file_from_string,
-};
+use super::{PageCatalog, process_spg_file_in_catalog, process_tbl_file_from_string};
 use crate::graph::{FileState, GraphDB, Node, NodeType};
 use crate::graph_store::{
     GraphReadStore, GraphStoreError, GraphStoreResult, GraphWriteStore, IndexCommit, IndexReport,
@@ -45,7 +42,9 @@ pub struct IndexPlan {
 /// 会一直保留旧规则的结果。把版本折进指纹，升级后每个文件第一次扫描都判为脏、
 /// 按新规则重建一次。
 /// - 2：跨页引用按前缀解析且不造幽灵 Page；空 `dbTableName` 不再中止（`landed: false`）。
-const SCANNER_SEMANTICS_VERSION: u32 = 2;
+/// - 3：路径解析正确但目标文件不存在的页面引用也不建边、不造 Page 节点，改记
+///   `SCANNER_UNRESOLVED_REFERENCE`；升级后的第一次扫描顺带清掉旧版本留下的无文件 Page。
+const SCANNER_SEMANTICS_VERSION: u32 = 3;
 
 /// 文件内容指纹：`s<扫描语义版本>-<内容 xxhash>`，见 [`SCANNER_SEMANTICS_VERSION`]。
 fn content_fingerprint(content_bytes: &[u8]) -> String {
@@ -89,15 +88,18 @@ pub enum ParsedGraphContent {
 fn ledger_from_parsed_content(
     logical_path: &str,
     content: &ParsedGraphContent,
+    catalog: Option<&PageCatalog>,
 ) -> Result<FileContributionLedger> {
     let mut temporary = crate::memory_graph_store::MemoryGraphStore::new();
     match content {
         ParsedGraphContent::Spg(value) => {
-            process_spg_file_from_value_with_identity(
+            process_spg_file_in_catalog(
                 &mut temporary,
                 logical_path,
                 value.clone(),
                 crate::scanner::spg::PageIdentityMode::OwnershipPageLocal,
+                crate::graph_schema::schema(),
+                catalog,
             )?;
         }
         ParsedGraphContent::Tbl(text) => {
@@ -213,12 +215,14 @@ fn apply_ownership_changes(
     ledgers: &mut BTreeMap<String, FileContributionLedger>,
     updates: &[ParsedGraphUpdate],
     deleted: &[DeletedFile],
+    catalog: &PageCatalog,
 ) -> Result<(
     HashMap<String, Vec<String>>,
     Vec<crate::ownership::OwnershipConflict>,
 )> {
     for update in updates {
-        let mut ledger = ledger_from_parsed_content(&update.logical_path, &update.content)?;
+        let mut ledger =
+            ledger_from_parsed_content(&update.logical_path, &update.content, Some(catalog))?;
         ledger.revision = update.file_hash.clone();
         ledgers.insert(update.logical_path.clone(), ledger);
     }
@@ -326,6 +330,11 @@ struct FileScanDiagnostics {
     /// 此时计数大于记录数，见 [`FileScanDiagnostics::lacks_occurrences`]。
     #[serde(default)]
     occurrences: Vec<crate::scanner::ScanOccurrence>,
+    /// 本文件里路径解析正确的跨页引用目标（含文件不存在的），升序去重。增量扫描
+    /// 凭它找出「目标页面出现、消失或被改写」时需要重解析的引用者。旧库 entry 没有
+    /// 这个字段（读作空）：旧语义版本下所有文件本轮都会重解析，不会漏。
+    #[serde(default)]
+    referenced_pages: Vec<String>,
 }
 
 impl FileScanDiagnostics {
@@ -354,6 +363,7 @@ impl FileScanDiagnostics {
             sample_parse_failed_location: counts.sample_parse_failed_location.clone(),
             parse_failed_reason: counts.parse_failed_reason.clone(),
             occurrences: counts.occurrences.clone(),
+            referenced_pages: counts.referenced_pages.iter().cloned().collect(),
         }
     }
 
@@ -385,7 +395,10 @@ impl FileScanDiagnostics {
 /// M59-B3：脏 TBL 文件同样写一条**全零** entry。它没有 SPG 那两项计数，但必须
 /// 覆盖同路径上可能残留的 `parse_failed` 标记——文件修好了、这轮解析成功了，
 /// 陈旧标记就得当场消失，否则会一直挂着一条永不退休的警告。
-fn per_file_scan_diagnostic_entry(update: &ParsedGraphUpdate) -> Result<Option<(String, Vec<u8>)>> {
+fn per_file_scan_diagnostic_entry(
+    update: &ParsedGraphUpdate,
+    catalog: &PageCatalog,
+) -> Result<Option<(String, Vec<u8>)>> {
     let counts = match &update.content {
         ParsedGraphContent::Spg(value) => {
             let mut counts = crate::scanner::spg::scan_raw_counts(value);
@@ -402,6 +415,7 @@ fn per_file_scan_diagnostic_entry(update: &ParsedGraphUpdate) -> Result<Option<(
             crate::scanner::spg::scan_page_reference_failures(
                 value,
                 &update.logical_path,
+                Some(catalog),
                 &mut counts,
             )?;
             counts
@@ -499,6 +513,96 @@ fn stale_scanner_diagnostic_paths(
         }
     }
     stale
+}
+
+/// 本次扫描发现的页面集合（判定跨页引用的目标文件是否存在）。
+fn page_catalog_of(discovered: &HashSet<String>) -> PageCatalog {
+    PageCatalog::from_logical_paths(discovered.iter().map(String::as_str))
+}
+
+/// 目标页面本轮出现、消失或被改写时，把**未改动**的引用者补进待解析列表。
+///
+/// 引用者的图内容取决于目标页面的状态：目标出现，原先记的「目标不存在」要换成边；
+/// 目标消失，边要换成诊断；目标被改写，批删它的节点会把引用者指向它的边一并删掉，
+/// 而这些边属于引用者、不会自己长回来。引用者是谁，由每个文件的 scanner entry 里
+/// 记下的 `referenced_pages` 反查。旧版本写的 entry 没有这个字段，但语义版本升级后
+/// 所有文件本轮都会重解析，不会漏。
+///
+/// 解码不出来的 entry 不碰（与 [`stale_scanner_diagnostic_paths`] 同一处理）。
+fn extend_dirty_with_page_referrers(
+    plan: &mut IndexPlan,
+    entries: &[(String, Vec<u8>)],
+    files: &[PathBuf],
+    project_dir: &Path,
+    discovered: &HashSet<String>,
+) {
+    let changed_pages: HashSet<&str> = plan
+        .dirty
+        .iter()
+        .map(|(rel, _, _)| rel.as_str())
+        .chain(plan.deleted.iter().map(|(rel, _)| rel.as_str()))
+        .filter(|rel| rel.ends_with(".spg"))
+        .collect();
+    if changed_pages.is_empty() {
+        return;
+    }
+    let dirty_paths: HashSet<&str> = plan.dirty.iter().map(|(rel, _, _)| rel.as_str()).collect();
+    let mut referrers: Vec<String> = Vec::new();
+    for (path, bytes) in entries {
+        if dirty_paths.contains(path.as_str()) || !discovered.contains(path.as_str()) {
+            continue;
+        }
+        let Ok(entry) = serde_json::from_slice::<FileScanDiagnostics>(bytes) else {
+            continue;
+        };
+        if entry
+            .referenced_pages
+            .iter()
+            .any(|target| changed_pages.contains(target.as_str()))
+        {
+            referrers.push(path.clone());
+        }
+    }
+    if referrers.is_empty() {
+        return;
+    }
+    let referrers: HashSet<String> = referrers.into_iter().collect();
+    // 沿用文件发现的顺序，保持扫描序确定
+    let extra: Vec<DirtyFile> = files
+        .iter()
+        .filter_map(|path| {
+            let rel = logical_path_of(path, project_dir);
+            referrers.contains(&rel).then(|| (rel, path.clone(), None))
+        })
+        .collect();
+    plan.dirty.extend(extra);
+}
+
+/// 旧语义版本留下的无文件占位节点：指纹不带当前语义版本前缀（说明这是升级后的第一次
+/// 扫描）时，找出图里路径不在本次发现文件里的 Page，以及挂在这类目标页名下的 link 参数
+/// 节点（`param:`，path 是目标页）。这些节点是旧版本为路径解析正确但文件不存在的引用
+/// 留的占位，不属于任何文件，重解析引用者也删不掉它们。
+fn legacy_ghost_stub_ids(
+    store: &dyn IndexScanStore,
+    prev_states: &HashMap<String, FileState>,
+    discovered: &HashSet<String>,
+) -> Result<Vec<String>> {
+    let current_prefix = format!("s{SCANNER_SEMANTICS_VERSION}-");
+    if prev_states
+        .values()
+        .all(|state| state.file_hash.starts_with(&current_prefix))
+    {
+        return Ok(Vec::new());
+    }
+    let mut ghosts = Vec::new();
+    for node in store.iter_nodes().map_err(|err| anyhow!("{err}"))? {
+        let is_stub_kind = node.node_type == NodeType::Page
+            || (node.node_type == NodeType::Field && node.id.starts_with("param:"));
+        if is_stub_kind && !discovered.contains(&node.path.replace('\\', "/")) {
+            ghosts.push(node.id);
+        }
+    }
+    Ok(ghosts)
 }
 
 /// 把本轮删除文件的路径与对账出的陈旧诊断路径合并去重。
@@ -836,13 +940,36 @@ impl ProjectIndexer {
     /// 去重后单次 `remove_nodes_by_ids`，再应用所有新增节点并移除已删除
     /// 文件的 file states。indexer 持有的是 `GraphWriteStore` trait 对象，
     /// 批删固定走 trait 层；`GraphDB` inherent 的同名方法不另建批删路径。
+    ///
+    /// 没有本次扫描的页面集合，所以不检查跨页引用的目标文件是否存在；项目扫描
+    /// 用 [`Self::apply_incremental_changes_in_catalog`]。
     pub fn apply_incremental_changes(
         graph: &mut dyn GraphWriteStore,
         new_states: &mut HashMap<String, FileState>,
         updates: &[ParsedGraphUpdate],
         deleted: &[DeletedFile],
     ) -> Result<HashMap<String, Vec<String>>> {
-        Self::apply_changes(graph, new_states, updates, deleted, true)
+        Self::apply_changes(graph, new_states, updates, deleted, None, &[], true)
+    }
+
+    /// 同 [`Self::apply_incremental_changes`]，另给出本次扫描发现的页面集合：
+    /// 目标文件不在集合里的跨页引用不建边、不造 Page 节点。
+    pub fn apply_incremental_changes_in_catalog(
+        graph: &mut dyn GraphWriteStore,
+        new_states: &mut HashMap<String, FileState>,
+        updates: &[ParsedGraphUpdate],
+        deleted: &[DeletedFile],
+        catalog: &PageCatalog,
+    ) -> Result<HashMap<String, Vec<String>>> {
+        Self::apply_changes(
+            graph,
+            new_states,
+            updates,
+            deleted,
+            Some(catalog),
+            &[],
+            true,
+        )
     }
 
     /// `apply_incremental_changes` 的实现。`preflight` 决定是否先干跑校验：
@@ -858,16 +985,19 @@ impl ProjectIndexer {
         new_states: &mut HashMap<String, FileState>,
         updates: &[ParsedGraphUpdate],
         deleted: &[DeletedFile],
+        catalog: Option<&PageCatalog>,
+        extra_removed: &[String],
         preflight: bool,
     ) -> Result<HashMap<String, Vec<String>>> {
         let merged_removed = merge_removed_node_ids(
             updates
                 .iter()
                 .map(|update| update.previous_node_ids.as_slice())
-                .chain(deleted.iter().map(|(_, node_ids)| node_ids.as_slice())),
+                .chain(deleted.iter().map(|(_, node_ids)| node_ids.as_slice()))
+                .chain(std::iter::once(extra_removed)),
         );
         if preflight {
-            Self::preflight_schema(&*graph, updates, &merged_removed)?;
+            Self::preflight_schema(&*graph, updates, &merged_removed, catalog)?;
         }
         if !merged_removed.is_empty() {
             graph.remove_nodes_by_ids(&merged_removed)?;
@@ -876,9 +1006,14 @@ impl ProjectIndexer {
         let mut touched_nodes = HashMap::new();
         for update in updates {
             let node_ids = match &update.content {
-                ParsedGraphContent::Spg(value) => {
-                    process_spg_file_from_value(graph, &update.logical_path, value.clone())?
-                }
+                ParsedGraphContent::Spg(value) => process_spg_file_in_catalog(
+                    graph,
+                    &update.logical_path,
+                    value.clone(),
+                    crate::scanner::spg::PageIdentityMode::LegacyGlobal,
+                    crate::graph_schema::schema(),
+                    catalog,
+                )?,
                 ParsedGraphContent::Tbl(content) => {
                     process_tbl_file_from_string(graph, &update.logical_path, content)?
                 }
@@ -903,6 +1038,7 @@ impl ProjectIndexer {
         graph: &dyn GraphWriteStore,
         updates: &[ParsedGraphUpdate],
         removed: &[String],
+        catalog: Option<&PageCatalog>,
     ) -> Result<()> {
         if updates.is_empty() {
             return Ok(());
@@ -912,9 +1048,14 @@ impl ProjectIndexer {
         let mut violations: Vec<String> = Vec::new();
         for update in updates {
             let result = match &update.content {
-                ParsedGraphContent::Spg(value) => {
-                    process_spg_file_from_value(&mut sink, &update.logical_path, value.clone())
-                }
+                ParsedGraphContent::Spg(value) => process_spg_file_in_catalog(
+                    &mut sink,
+                    &update.logical_path,
+                    value.clone(),
+                    crate::scanner::spg::PageIdentityMode::LegacyGlobal,
+                    crate::graph_schema::schema(),
+                    catalog,
+                ),
                 ParsedGraphContent::Tbl(content) => {
                     process_tbl_file_from_string(&mut sink, &update.logical_path, content)
                 }
@@ -1097,19 +1238,37 @@ impl ProjectIndexer {
 
         let files = Self::discover_files(project_dir)?;
         let provider = LocalStorageProvider;
-        let plan = Self::diff_file_states(&files, &prev_states, project_dir, &provider)?;
+        let mut plan = Self::diff_file_states(&files, &prev_states, project_dir, &provider)?;
 
-        // M59 codex 复审返修：与当前文件集对账，找出既有覆盖机制够不着的陈旧诊断
-        // （孤儿 entry / 内容已复原但警告仍在）。见 `stale_scanner_diagnostic_paths`。
         let discovered: HashSet<String> = files
             .iter()
             .map(|path| logical_path_of(path, project_dir))
             .collect();
+        let catalog = page_catalog_of(&discovered);
+        let scanner_entries_before = backend
+            .store()
+            .load_scanner_diagnostic_entries()
+            .map_err(|err| anyhow!("{err}"))?;
+        // 目标页面出现、消失或被改写时，未改动的引用者也要重解析（见函数文档）。
+        extend_dirty_with_page_referrers(
+            &mut plan,
+            &scanner_entries_before,
+            &files,
+            project_dir,
+            &discovered,
+        );
+        // 旧语义版本留下的无文件 Page 占位：升级后的第一次扫描一并清掉。
+        // ownership 路径由账本整体重建，不会留占位。
+        let legacy_ghost_stubs = if ownership_enabled {
+            Vec::new()
+        } else {
+            legacy_ghost_stub_ids(backend.store(), &prev_states, &discovered)?
+        };
+
+        // M59 codex 复审返修：与当前文件集对账，找出既有覆盖机制够不着的陈旧诊断
+        // （孤儿 entry / 内容已复原但警告仍在）。见 `stale_scanner_diagnostic_paths`。
         let stale_diagnostic_paths = stale_scanner_diagnostic_paths(
-            &backend
-                .store()
-                .load_scanner_diagnostic_entries()
-                .map_err(|err| anyhow!("{err}"))?,
+            &scanner_entries_before,
             &discovered,
             &prev_states,
             &plan.dirty,
@@ -1119,7 +1278,10 @@ impl ProjectIndexer {
         let mut new_states = prev_states.clone();
 
         // 只有陈旧诊断要清时也得进这个分支：否则清理提交永远没有机会发生。
-        if !plan.dirty.is_empty() || !plan.deleted.is_empty() || !stale_diagnostic_paths.is_empty()
+        if !plan.dirty.is_empty()
+            || !plan.deleted.is_empty()
+            || !stale_diagnostic_paths.is_empty()
+            || !legacy_ghost_stubs.is_empty()
         {
             let (updates, parse_failures) = Self::parse_dirty_files_with_failures(
                 &prev_states,
@@ -1131,7 +1293,7 @@ impl ProjectIndexer {
             // 与图/file states 在同一事务落库（M58.3 复核返修：原子化）
             let mut scanner_entries = Vec::new();
             for update in &updates {
-                if let Some(entry) = per_file_scan_diagnostic_entry(update)? {
+                if let Some(entry) = per_file_scan_diagnostic_entry(update, &catalog)? {
                     scanner_entries.push(entry);
                 }
             }
@@ -1146,8 +1308,13 @@ impl ProjectIndexer {
                 // grafeo+ownership 已在入口 bail。
                 ScanBackend::Redb(graph) if ownership_enabled => {
                     let mut ledgers = graph.ownership_ledgers().cloned().unwrap_or_default();
-                    let (parsed_nodes, conflicts) =
-                        apply_ownership_changes(graph, &mut ledgers, &updates, &plan.deleted)?;
+                    let (parsed_nodes, conflicts) = apply_ownership_changes(
+                        graph,
+                        &mut ledgers,
+                        &updates,
+                        &plan.deleted,
+                        &catalog,
+                    )?;
                     ownership_conflicts = conflicts;
                     for (logical_path, _) in &plan.deleted {
                         new_states.remove(logical_path);
@@ -1162,7 +1329,8 @@ impl ProjectIndexer {
                         updates
                             .iter()
                             .map(|update| update.previous_node_ids.as_slice())
-                            .chain(plan.deleted.iter().map(|(_, node_ids)| node_ids.as_slice())),
+                            .chain(plan.deleted.iter().map(|(_, node_ids)| node_ids.as_slice()))
+                            .chain(std::iter::once(legacy_ghost_stubs.as_slice())),
                     );
                     let removed_edge_keys = if wants_delta {
                         collect_incident_edge_keys(&*store, &merged_removed)
@@ -1179,6 +1347,8 @@ impl ProjectIndexer {
                         &mut new_states,
                         &updates,
                         &plan.deleted,
+                        Some(&catalog),
+                        &legacy_ghost_stubs,
                         !fresh,
                     ) {
                         Ok(parsed_nodes) => parsed_nodes,
@@ -1354,16 +1524,27 @@ impl ProjectIndexer {
 
         let files = Self::discover_files(project_dir)?;
         let provider = LocalStorageProvider;
-        let plan = Self::diff_file_states(&files, &prev_states, project_dir, &provider)?;
+        let mut plan = Self::diff_file_states(&files, &prev_states, project_dir, &provider)?;
 
-        // M59 codex 复审返修：与 scan 同一套对账（prepare 不落盘，路径随
-        // PreparedIndexUpdate 透传给编排器）。
         let discovered: HashSet<String> = files
             .iter()
             .map(|path| logical_path_of(path, project_dir))
             .collect();
+        let catalog = page_catalog_of(&discovered);
+        let scanner_entries_before = graph.load_scanner_diagnostic_entries()?;
+        // 与 scan 同一套：目标页面变化时，未改动的引用者也要重解析。
+        extend_dirty_with_page_referrers(
+            &mut plan,
+            &scanner_entries_before,
+            &files,
+            project_dir,
+            &discovered,
+        );
+
+        // M59 codex 复审返修：与 scan 同一套对账（prepare 不落盘，路径随
+        // PreparedIndexUpdate 透传给编排器）。
         let stale_diagnostic_paths = stale_scanner_diagnostic_paths(
-            &graph.load_scanner_diagnostic_entries()?,
+            &scanner_entries_before,
             &discovered,
             &prev_states,
             &plan.dirty,
@@ -1381,7 +1562,7 @@ impl ProjectIndexer {
         // 候选图不落盘不代表诊断可以丢——持久化责任移交调用方。
         let mut scanner_entries = Vec::new();
         for update in &updates {
-            if let Some(entry) = per_file_scan_diagnostic_entry(update)? {
+            if let Some(entry) = per_file_scan_diagnostic_entry(update, &catalog)? {
                 scanner_entries.push(entry);
             }
         }
@@ -1394,8 +1575,13 @@ impl ProjectIndexer {
             let mut ledgers = graph.ownership_ledgers().cloned().unwrap_or_default();
             // M59-2：来源冲突随候选更新透出（不再丢弃）——调用方（diff-refresh
             // 编排器）据此把冲突写进诊断与 runtime 状态，使冲突在查询侧可见。
-            let (parsed_nodes, conflicts) =
-                apply_ownership_changes(&mut graph, &mut ledgers, &updates, &plan.deleted)?;
+            let (parsed_nodes, conflicts) = apply_ownership_changes(
+                &mut graph,
+                &mut ledgers,
+                &updates,
+                &plan.deleted,
+                &catalog,
+            )?;
             prepare_conflicts = conflicts;
             for (logical_path, _) in &plan.deleted {
                 new_states.remove(logical_path);
@@ -1411,11 +1597,12 @@ impl ProjectIndexer {
             );
             let removed_edge_keys = collect_incident_edge_keys(&graph, &merged_removed);
             // dirty previous IDs 与 deleted IDs 合并去重后只做一次图批删（与 scan 一致）
-            let parsed_nodes = Self::apply_incremental_changes(
+            let parsed_nodes = Self::apply_incremental_changes_in_catalog(
                 &mut graph,
                 &mut new_states,
                 &updates,
                 &plan.deleted,
+                &catalog,
             )?;
             // M56：apply 后收集新增/变更节点的 incident edges
             let new_node_ids: Vec<String> = parsed_nodes

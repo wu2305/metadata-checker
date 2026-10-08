@@ -792,7 +792,7 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
             SPG,
             "A link action with targetType app whose path is an index into referenceResources that resolves to a .spg page path: the target Page node is upserted, then Action -> Page.",
         )],
-        absent_when: "A link whose target cannot be resolved to a page path (index out of range, an absolute path, a URI, an unknown $-prefix, a target that is not .spg) produces no edge and no Page node; the gap is recorded as a SCANNER_UNRESOLVED_REFERENCE occurrence in the IndexState record scanner_entry:<page path> (a link with no path at all is recorded too, as a missing index). A link whose path resolves but whose file does not exist still produces the edge, to a Page node that no scanned file backs (no file_state record). Absence is not proof there is no navigation. The query-time diagnostic UNRESOLVED_PAGE_NAVIGATION only fires for a target node that is missing from the graph, which this scanner never leaves, so it does not cover either case; use the scanner_entry record.",
+        absent_when: "A link whose target cannot be resolved to a page path (index out of range, an absolute path, a URI, an unknown $-prefix, a target that is not .spg) produces no edge and no Page node; the gap is recorded as a SCANNER_UNRESOLVED_REFERENCE occurrence in the IndexState record scanner_entry:<page path> (a link with no path at all is recorded too, as a missing index). A link whose path resolves but whose file is not among the scanned files is treated the same way: no edge, no Page node, no param node under the missing target, and the occurrence's detail names the resolved path. Absence is not proof there is no navigation. The query-time diagnostic UNRESOLVED_PAGE_NAVIGATION only fires for a target node that is missing from the graph, which this scanner never leaves, so it does not cover any of these cases; use the scanner_entry record.",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::PassesParam,
@@ -952,7 +952,7 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
             SPG,
             "An embedsuperpage component whose resPath is an index into referenceResources that resolves to a .spg page path: the target Page node is upserted, then Component -> Page.",
         )],
-        absent_when: "An embed whose target cannot be resolved (or has no resPath) produces no edge; the gap is recorded as a SCANNER_UNRESOLVED_REFERENCE occurrence in the IndexState record scanner_entry:<page path>. One whose path resolves but whose file does not exist produces the edge to a Page node that no scanned file backs (no file_state record).",
+        absent_when: "An embed whose target cannot be resolved (or has no resPath) produces no edge; the gap is recorded as a SCANNER_UNRESOLVED_REFERENCE occurrence in the IndexState record scanner_entry:<page path>. One whose path resolves but whose file is not among the scanned files is treated the same way: no edge and no Page node, and the occurrence's detail names the resolved path.",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::DependsOn,
@@ -1156,7 +1156,7 @@ const INTERPRETATION_RULES: &[InterpretationRule] = &[
     },
     InterpretationRule {
         id: "dangling-page",
-        rule: "A Page node with no Contains edge is not necessarily a reference to a missing file: a scanned page with no canvas has none either. A page was scanned only if an IndexState record with key 'file_state:<path>' exists for it. A Page node without that record was created from a link or embed target, and no scanned file backs it.",
+        rule: "A Page node with no Contains edge is not necessarily a reference to a missing file: a scanned page with no canvas has none either. Every Page node is backed by a scanned file, which has an IndexState record with key 'file_state:<path>'; a link or embed to a page that does not exist produces no Page node (see absent_when of ActionNavigates and EmbedsPage). A graph built by an older scanner version may still hold Page nodes without that record until its next scan, which removes them.",
     },
     InterpretationRule {
         id: "depends-on-is-overloaded",
