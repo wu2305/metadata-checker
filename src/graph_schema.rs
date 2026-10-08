@@ -230,7 +230,7 @@ const NODE_TYPES: &[NodeTypeSchema] = &[
         summary: "A SuperPage file (.spg), or a page that another page refers to.",
         id_prefixes: &["page"],
         id_formats: &["page:<project-relative path>"],
-        path_meaning: "The .spg path. A referenced page is created from the link target even when no file exists there, so a Page node is a dangling reference unless a scanned file backs it (see the dangling-page rule); a missing Contains edge alone does not tell, since a scanned page with no canvas has none.",
+        path_meaning: "The .spg path. In a project scan every Page node has a scanned file behind it: a link or embed whose target file does not exist produces no Page node (see absent_when of ActionNavigates and EmbedsPage). A graph built by an older scanner version may still hold a dangling Page until its next scan. A missing Contains edge alone does not tell whether the page was scanned, since a scanned page with no canvas has none.",
         meta_keys: &[],
         meta_open: false,
         notes: "No meta.",
@@ -1156,7 +1156,7 @@ const INTERPRETATION_RULES: &[InterpretationRule] = &[
     },
     InterpretationRule {
         id: "dangling-page",
-        rule: "A Page node with no Contains edge is not necessarily a reference to a missing file: a scanned page with no canvas has none either. Every Page node is backed by a scanned file, which has an IndexState record with key 'file_state:<path>'; a link or embed to a page that does not exist produces no Page node (see absent_when of ActionNavigates and EmbedsPage). A graph built by an older scanner version may still hold Page nodes without that record until its next scan, which removes them.",
+        rule: "A Page node with no Contains edge is not necessarily a reference to a missing file: a scanned page with no canvas has none either. In a project scan every Page node is backed by a scanned file, which has an IndexState record with key 'file_state:<path>'; a link or embed to a page that does not exist produces no Page node (see absent_when of ActionNavigates and EmbedsPage). A graph built by an older scanner version may still hold Page nodes without that record until its next scan, which removes them.",
     },
     InterpretationRule {
         id: "depends-on-is-overloaded",
@@ -1224,7 +1224,7 @@ const LABELS: GraphLabels = GraphLabels {
     internal_records: &[
         IndexStateRecord {
             key_form: "file_state:<file path>",
-            meaning: "One per scanned file, including a page with no canvas. Its presence is the evidence that the file was scanned; a Page node without it was created from a link or embed target.",
+            meaning: "One per scanned file, including a page with no canvas. Its presence is the evidence that the file was scanned; a Page node without it was left by an older scanner version, which created Page nodes for link or embed targets whose files do not exist.",
             value_shape: "JSON: file_path, file_hash, mtime, size, node_ids (the node ids the file produced).",
         },
         IndexStateRecord {

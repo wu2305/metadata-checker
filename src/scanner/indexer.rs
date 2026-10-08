@@ -537,11 +537,13 @@ fn extend_dirty_with_page_referrers(
     project_dir: &Path,
     discovered: &HashSet<String>,
 ) {
+    // `referenced_pages` 里是正斜杠路径；Windows 上 `logical_path_of` 带平台分隔符，
+    // 比较前统一成正斜杠（与 `PageCatalog` 同一口径）。
     let mut changed_pages: HashSet<String> = plan
         .dirty
         .iter()
-        .map(|(rel, _, _)| rel.clone())
-        .chain(plan.deleted.iter().map(|(rel, _)| rel.clone()))
+        .map(|(rel, _, _)| rel.replace('\\', "/"))
+        .chain(plan.deleted.iter().map(|(rel, _)| rel.replace('\\', "/")))
         .filter(|rel| rel.ends_with(".spg"))
         .collect();
     if changed_pages.is_empty() {
@@ -562,14 +564,15 @@ fn extend_dirty_with_page_referrers(
     loop {
         let mut grew = false;
         for (path, referenced) in &candidates {
-            if changed_pages.contains(path.as_str()) {
+            let normalized = path.replace('\\', "/");
+            if changed_pages.contains(&normalized) {
                 continue;
             }
             if referenced
                 .iter()
                 .any(|target| changed_pages.contains(target))
             {
-                changed_pages.insert((*path).clone());
+                changed_pages.insert(normalized);
                 referrers.insert((*path).clone());
                 grew = true;
             }
