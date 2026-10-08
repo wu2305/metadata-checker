@@ -512,6 +512,42 @@ const NODE_TYPES: &[NodeTypeSchema] = &[
         meta_open: false,
         notes: "Model filter clauses are Condition nodes owned by the model (json_path starts with sources[...].filter); read raw_expr for the filter fields.",
     },
+    NodeTypeSchema {
+        node_type: NodeType::Script,
+        summary: "A script file: a backend Nashorn script (<name>.action.ts) or a project's frontend custom.ts. The <name>.action file next to a backend script is its compiled copy and has no node.",
+        id_prefixes: &["script"],
+        id_formats: &["script:<project-relative path of the script source file>"],
+        path_meaning: "The script source file path (<name>.action.ts or custom.ts), the same project-relative path the id carries. Scripts are listed from files that were scanned, so a Script node is backed by a file (unlike a Page node created from a link target).",
+        meta_keys: &[
+            req(
+                "kind",
+                Str,
+                "backend (<name>.action.ts, Nashorn) or frontend (custom.ts).",
+            ),
+            req(
+                "content_hash",
+                Str,
+                "Hash of the script text (xxh64, hex). A later analysis pins itself to this value; it changes whenever the script text changes.",
+            ),
+            opt(
+                "entry_names",
+                Array,
+                "Frontend only: sorted names of the functions the file exposes to pages (the keys of every CustomActions map in it). Names only, no code.",
+            ),
+            opt(
+                "bindings",
+                Object,
+                "Frontend only: the page bindings declared in the file, as { page key: [function names] }. The page key is a bare file name or an absolute path exactly as written in the file's CustomJS map.",
+            ),
+            opt(
+                "imports",
+                Array,
+                "Backend only: the import specifiers that are project paths, as written, in source order.",
+            ),
+        ],
+        meta_open: false,
+        notes: "The scan lists scripts and links them (ExecutesScript, LinksScript); it does not read what a script does. A script with no further edges is not known to be free of side effects.",
+    },
 ];
 
 // ---------------------------------------------------------------- 边
@@ -1133,6 +1169,28 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
         producers: &[],
         absent_when: "Always absent; do not query it.",
     },
+    EdgeTypeSchema {
+        edge_type: EdgeType::ExecutesScript,
+        summary: "Declared in the enum, not yet written by the scanner. It will link a page script action to the frontend custom.ts bound to its page.",
+        emitted: false,
+        endpoints: &[],
+        field_path: FieldPathUse::Never,
+        field_path_meaning: "Not applicable.",
+        meta_keys: NO_META,
+        producers: &[],
+        absent_when: "Always absent for now; do not query it.",
+    },
+    EdgeTypeSchema {
+        edge_type: EdgeType::LinksScript,
+        summary: "Declared in the enum, not yet written by the scanner. It will link a table dataflow Script node, a page webAPI action or a script import to a backend script.",
+        emitted: false,
+        endpoints: &[],
+        field_path: FieldPathUse::Never,
+        field_path_meaning: "Not applicable.",
+        meta_keys: NO_META,
+        producers: &[],
+        absent_when: "Always absent for now; do not query it.",
+    },
 ];
 
 // ---------------------------------------------------------------- 解释规则与方言
@@ -1177,6 +1235,10 @@ const INTERPRETATION_RULES: &[InterpretationRule] = &[
     InterpretationRule {
         id: "model-filters-are-conditions",
         rule: "Filters configured on a model are Condition nodes owned by that model (DependsOn edge with meta.operation = Conditions, json_path starting with sources[...].filter). Read their raw_expr for the filter fields and values.",
+    },
+    InterpretationRule {
+        id: "scripts-are-listed-not-read",
+        rule: "Script nodes and their ExecutesScript / LinksScript edges say that a script exists and who points at it. Nothing in the scan says what a script reads, writes or changes: a script without further edges is not known to be harmless, and a page whose script action is bound may still have its components changed at run time.",
     },
 ];
 

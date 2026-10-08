@@ -270,7 +270,7 @@ pub fn id_shape_problem(id: &str) -> Option<&'static str> {
     }
     let pipes = rest.bytes().filter(|byte| *byte == b'|').count();
     match kind {
-        "page" | "user" | "system" if pipes != 0 => Some("该类型的 id 不应含 `|`"),
+        "page" | "user" | "system" | "script" if pipes != 0 => Some("该类型的 id 不应含 `|`"),
         "comp" if pipes != 1 => Some("应为 `<页面>|<组件 id>` 两段"),
         "action" if pipes != 2 => Some("应为 `<页面>|<组件 id>|<动作 id>` 三段"),
         "cond" if pipes != 1 => Some("应为 `<页面>|<条件局部名>` 两段"),
@@ -298,7 +298,7 @@ pub fn id_shape_problem(id: &str) -> Option<&'static str> {
         "user" if !has_inner_separator(rest, b'.') => {
             Some("应为 `<命名空间>.<名字>`（`.` 两侧都非空）")
         }
-        "page" | "user" | "system" | "comp" | "action" | "model" | "param" => None,
+        "page" | "user" | "system" | "script" | "comp" | "action" | "model" | "param" => None,
         _ => Some("未知的 kind 前缀"),
     }
 }

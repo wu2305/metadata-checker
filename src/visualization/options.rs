@@ -44,6 +44,8 @@ pub enum NodeKind {
     Condition,
     /// 诊断/提示节点
     Diagnostic,
+    /// 脚本文件（后端 `.action.ts` / 前端 `custom.ts`）
+    Script,
 }
 
 impl std::fmt::Display for NodeKind {
@@ -56,6 +58,7 @@ impl std::fmt::Display for NodeKind {
             NodeKind::Action => write!(f, "Action"),
             NodeKind::Condition => write!(f, "Condition"),
             NodeKind::Diagnostic => write!(f, "Diagnostic"),
+            NodeKind::Script => write!(f, "Script"),
         }
     }
 }

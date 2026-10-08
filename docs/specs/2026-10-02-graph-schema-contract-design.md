@@ -122,7 +122,7 @@ S1 无图结构变化，可先行；S3 / S4 触发 schema 版本变化，须在 
 
 ### 6.3 图形状（契约表新增的行，随 S6 落地）
 
-- 新节点类型 `Script`：脚本本身。id `script:<源文件>|<脚本引用>`；`meta` 含 `kind`（`frontend`：普通 `.ts`；`backend`：`action.ts`，Nashorn）、`content_hash`（脚本文本的 hash）、`entry_names`（已知函数名，如 `setMsg`）。
+- 新节点类型 `Script`：脚本本身。**一个脚本源文件一个节点**，id `script:<项目相对路径>`（登记 PR 按真实语料定稿：语料里没有内嵌脚本，原先的 `|<脚本引用>` 段用不上；`X.action` 编译副本不建节点）；`meta` 含 `kind`（`frontend`：每个项目/应用的 `custom.ts`；`backend`：`X.action.ts`，Nashorn）、`content_hash`（脚本文本的 hash，xxh64 十六进制）、仅前端的 `entry_names`（该文件对页面暴露的函数名，只存名字）与 `bindings`（`CustomJS` 里声明的绑定：`{页面键: [函数名]}`，页面键原样保留），仅后端的 `imports`（`import` 说明符里属于项目路径的部分，按出现顺序）。
 - 新**扫描**边（确定性，属于扫描事实）：`ExecutesScript`：`Action → Script`（前端 `script` action，按 `scriptFunction` 在页面绑定的 `.ts` 文件里定位函数；页面与 `.ts` 的绑定规则见 §7 问题 9）；后端（2026-10-05 按真实语料更正，原先的「workflow 节点按路径指向」不成立）：链接边（暂名 `LinksScript`）由扫描确定性地产生，来源有三种：`.tbl` 数据流的 `Script` 节点按**裸 hash id**（无路径、无后缀）指向脚本，端点 `Model → Script`；`.spg` 的 `webAPI.url` 按路径指向 `.action.ts`，端点 `Action → Script`；脚本之间的 `import`，端点 `Script → Script`；路径解析不到文件时**不造占位 `Script` 节点**（与页面引用的处理一致：不为不存在的文件造节点，PR #9），而是把未解析的脚本标识（裸 hash id 或路径原文）记为一条 `Diagnostic`，用 `HasDiagnostic` 边挂在发出引用的 `Action` / `Model` / `Script`（脚本 `import` 找不到目标时）上，契约表里 `HasDiagnostic` 的合法起点因此包含这三类（诊断入图见[图优先重设计](2026-10-02-graph-first-redesign-design.md) §2.3）；这样 GQL 仍能从发出引用的节点出发查到「它期望哪个脚本、没找到」，不静默丢弃（2026-10-05 修订：原为占位节点，会让 `Script` 计数里混入没有文件的节点）。扫描只负责「这里有一段脚本」，不解读脚本。
 - 新**衍生**边（仅起点为 `Script` 节点，端点必须是图里已存在的节点）：
 

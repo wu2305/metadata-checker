@@ -38,6 +38,8 @@ fn generate_next_queries(
                 }
             }
         }
+        // 脚本节点没有页面/模型级的后续查询，只给 `--explain` 通用入口
+        crate::graph::NodeType::Script => {}
         crate::graph::NodeType::Model | crate::graph::NodeType::Field => {
             if node_id.starts_with("field:") {
                 if let Some(model_part) = node_id

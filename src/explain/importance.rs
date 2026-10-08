@@ -76,5 +76,6 @@ pub(super) fn classify_importance(
             }
         }
         NodeType::Condition => "condition".to_string(),
+        NodeType::Script => "script".to_string(),
     }
 }

@@ -16,6 +16,8 @@ pub enum NodeType {
     Action,
     /// 条件/表达式节点（visibleCondition、action.conditionExp 等）
     Condition,
+    /// 脚本文件：后端 `X.action.ts`（Nashorn）或前端 `custom.ts`；`X.action` 编译副本不建节点
+    Script,
 }
 
 /// 图中边类型（关系语义）
@@ -46,6 +48,10 @@ pub enum EdgeType {
     ActionLoadsData,
     /// 条件/表达式对上游符号的依赖（组件值、参数、用户属性、系统变量）
     DependsOn,
+    /// 页面 `script` 动作 → 页面绑定的前端 `custom.ts`（`field_path` 为 `scriptFunction` 函数名）
+    ExecutesScript,
+    /// 确定性的「这里有一段脚本」链接：数据流 `Script` 节点 / `webAPI.url` / `import` → 后端脚本
+    LinksScript,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

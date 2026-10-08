@@ -207,6 +207,9 @@ fn scan_fails_when_an_edge_endpoint_combination_is_not_registered() {
 fn node_ids_with_an_empty_or_miscounted_segment_are_rejected() {
     let bad_ids = [
         (NodeType::Page, "page:"),
+        // 脚本 id 只有一段路径：空路径与带 `|` 的 id 都不是登记形态
+        (NodeType::Script, "script:"),
+        (NodeType::Script, "script:app/a.action.ts|run"),
         (NodeType::Component, "comp:app/a.spg|"),
         (NodeType::Component, "comp:|btn"),
         (NodeType::Component, "comp:app/a.spg"),
@@ -271,6 +274,8 @@ fn node_ids_with_an_empty_or_miscounted_segment_are_rejected() {
 fn well_formed_node_ids_pass_the_grammar_check() {
     let good_ids = [
         (NodeType::Page, "page:app/a.spg"),
+        (NodeType::Script, "script:app/API/a.action.ts"),
+        (NodeType::Script, "script:app/售后.app/custom.ts"),
         (NodeType::Component, "comp:app/a.spg|btn"),
         (NodeType::Action, "action:app/a.spg|btn|a1"),
         (NodeType::Model, "model:orders"),
@@ -995,6 +1000,63 @@ mod failed_scan_leaves_graph_untouched {
         assert_eq!(
             recovered.file_states.keys().collect::<Vec<_>>(),
             expected.file_states.keys().collect::<Vec<_>>()
+        );
+    }
+}
+
+// ------------------------------------------------------------ Script 节点
+
+/// Script 节点：`kind` 与 `content_hash` 是必需键，缺一个就拒收；齐全的写入通过。
+#[test]
+fn script_node_requires_kind_and_content_hash() {
+    let schema = graph_schema::schema();
+    let id = "script:app/API/a.action.ts";
+    let complete = node(
+        id,
+        NodeType::Script,
+        Some(serde_json::json!({"kind": "backend", "content_hash": "00ff"})),
+    );
+    assert_eq!(
+        graph_schema::node_violations(schema, &complete, false),
+        Vec::<String>::new(),
+        "齐全的 Script 节点不该被拒"
+    );
+    for missing in ["kind", "content_hash"] {
+        let mut meta = serde_json::json!({"kind": "backend", "content_hash": "00ff"});
+        meta.as_object_mut().expect("meta 是对象").remove(missing);
+        let violations =
+            graph_schema::node_violations(schema, &node(id, NodeType::Script, Some(meta)), false);
+        assert_eq!(
+            violations
+                .iter()
+                .any(|v| v.contains("缺少必需 meta 键") && v.contains(missing)),
+            true,
+            "缺 {missing} 应被拒：{violations:?}"
+        );
+    }
+}
+
+/// 链接边在契约里只是登记了枚举、扫描器还不产生：此时真的写出来要被拒，
+/// 而不是悄悄落盘（有写入点之后，登记它们的 PR 再改成会产生）。
+#[test]
+fn script_link_edges_are_rejected_until_the_scanner_emits_them() {
+    for edge_type in [EdgeType::ExecutesScript, EdgeType::LinksScript] {
+        let violations = graph_schema::edge_violations(
+            graph_schema::schema(),
+            &edge(
+                "action:app/a.spg|btn|a1",
+                "script:app/a.action.ts",
+                edge_type,
+            ),
+            Some(&NodeType::Action),
+            Some(&NodeType::Script),
+        );
+        assert_eq!(
+            violations
+                .iter()
+                .any(|v| v.contains("契约声明不会产生的边")),
+            true,
+            "尚未启用的边应被拒：{violations:?}"
         );
     }
 }
