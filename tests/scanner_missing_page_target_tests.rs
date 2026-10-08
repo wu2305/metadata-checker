@@ -191,8 +191,8 @@ fn full_snapshot(project: &Path, dir: &Path, backend: &str, tag: &str) -> Vec<St
 fn assert_same(label: &str, full: &[String], incremental: &[String]) {
     let only_full: Vec<&String> = full.iter().filter(|l| !incremental.contains(l)).collect();
     let only_inc: Vec<&String> = incremental.iter().filter(|l| !full.contains(l)).collect();
-    assert!(
-        full == incremental,
+    assert_eq!(
+        full, incremental,
         "{label}：增量与全量必须逐项相等\n仅全量有：{only_full:#?}\n仅增量有：{only_inc:#?}"
     );
 }
@@ -216,15 +216,17 @@ fn missing_target_leaves_no_page_edge_or_param_node_and_one_record_per_site() {
             "{backend}：只有磁盘上有文件的页面；ghost.spg 不得留下节点"
         );
         let lines = snapshot(&db);
-        assert!(
-            !lines
+        assert_eq!(
+            lines
                 .iter()
                 .any(|line| (line.starts_with("N|") || line.starts_with("E|"))
                     && line.contains("ghost")),
+            false,
             "{backend}：不得有指向或挂在 ghost 名下的节点或边：{lines:#?}"
         );
-        assert!(
-            !lines.iter().any(|line| line.starts_with("N|param:ghost/")),
+        assert_eq!(
+            lines.iter().any(|line| line.starts_with("N|param:ghost/")),
+            false,
             "{backend}：目标页不存在，link 参数节点也不该有"
         );
         let embeds = lines.iter().filter(|l| l.contains("|EmbedsPage|")).count();
@@ -244,10 +246,11 @@ fn missing_target_leaves_no_page_edge_or_param_node_and_one_record_per_site() {
             2,
             "{backend}：内嵌与 link 各一条：{records:#?}"
         );
-        assert!(
+        assert_eq!(
             records
                 .iter()
                 .all(|r| r.contains("reference target page does not exist: app/ghost.spg")),
+            true,
             "{backend}：记录要说明目标页面不存在，并带上解析出的路径：{records:#?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -275,14 +278,16 @@ fn target_appearing_later_turns_the_diagnostic_into_an_edge() {
         let full = full_snapshot(&project, &dir, backend, "appear-full");
         let incremental = snapshot(&db);
         assert_same(&format!("{backend} 目标出现"), &full, &incremental);
-        assert!(
-            !incremental.iter().any(|l| l.starts_with("R|")),
+        assert_eq!(
+            incremental.iter().any(|l| l.starts_with("R|")),
+            false,
             "{backend}：目标已存在，不应再有未解析记录"
         );
-        assert!(
+        assert_eq!(
             incremental
                 .iter()
                 .any(|l| l.starts_with("N|param:ghost/order_id")),
+            true,
             "{backend}：目标存在时 link 参数节点照旧"
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -300,8 +305,9 @@ fn target_disappearing_turns_the_edge_into_a_diagnostic() {
         write(&project, "app/ghost.spg", &plain_page("real"));
         let db = dir.join(backend);
         ProjectIndexer::scan_with_diagnostics(&project, &db).expect("initial scan");
-        assert!(
-            !snapshot(&db).iter().any(|l| l.starts_with("R|")),
+        assert_eq!(
+            snapshot(&db).iter().any(|l| l.starts_with("R|")),
+            false,
             "{backend}：起点没有未解析记录"
         );
 
@@ -316,7 +322,10 @@ fn target_disappearing_turns_the_edge_into_a_diagnostic() {
             2,
             "{backend}：内嵌与 link 各记一条"
         );
-        assert!(!page_paths(&db).contains(&"app/ghost.spg".to_string()));
+        assert_eq!(
+            page_paths(&db).contains(&"app/ghost.spg".to_string()),
+            false
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
@@ -338,10 +347,11 @@ fn rewriting_the_target_keeps_the_referrers_edges() {
         let full = full_snapshot(&project, &dir, backend, "rewrite-full");
         let incremental = snapshot(&db);
         assert_same(&format!("{backend} 目标改写"), &full, &incremental);
-        assert!(
+        assert_eq!(
             incremental
                 .iter()
                 .any(|l| l.contains("|EmbedsPage|") && l.contains("page:app/b.spg")),
+            true,
             "{backend}：指向 b.spg 的内嵌边必须还在"
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -438,10 +448,11 @@ fn upgrade_scan_sweeps_stubs_left_by_the_previous_scanner_version() {
     let expected = snapshot(&db);
 
     plant_legacy_stubs(&mut GrafeoGraphStore::open(&db).expect("open"));
-    assert!(
+    assert_eq!(
         snapshot(&db)
             .iter()
             .any(|l| l.starts_with("N|page:app/ghost.spg|")),
+        true,
         "前置：旧版本的占位已就位"
     );
 
