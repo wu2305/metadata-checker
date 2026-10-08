@@ -1185,6 +1185,7 @@ fn build_selection_visual_graph(
             NodeType::Component => NodeKind::Component,
             NodeType::Page => NodeKind::Page,
             NodeType::Condition => NodeKind::Condition,
+            NodeType::Script => NodeKind::Script,
         }
     }
 
@@ -1248,6 +1249,11 @@ fn build_selection_visual_graph(
                 "action_loads_data",
             ),
             EdgeType::DependsOn => (EdgeKind::DependsOn, "depends_on"),
+            EdgeType::ExecutesScript => (
+                EdgeKind::Other("ExecutesScript".to_string()),
+                "executes_script",
+            ),
+            EdgeType::LinksScript => (EdgeKind::Other("LinksScript".to_string()), "links_script"),
         }
     }
 

@@ -32,7 +32,8 @@ fn all_node_types() -> Vec<NodeType> {
         | NodeType::Model
         | NodeType::Field
         | NodeType::Action
-        | NodeType::Condition => {}
+        | NodeType::Condition
+        | NodeType::Script => {}
     }
     vec![
         NodeType::Page,
@@ -41,6 +42,7 @@ fn all_node_types() -> Vec<NodeType> {
         NodeType::Field,
         NodeType::Action,
         NodeType::Condition,
+        NodeType::Script,
     ]
 }
 
@@ -69,7 +71,9 @@ fn all_edge_types() -> Vec<EdgeType> {
         | EdgeType::ActionControlsComponent
         | EdgeType::ActionValidates
         | EdgeType::ActionLoadsData
-        | EdgeType::DependsOn => {}
+        | EdgeType::DependsOn
+        | EdgeType::ExecutesScript
+        | EdgeType::LinksScript => {}
     }
     vec![
         EdgeType::Reads,
@@ -94,6 +98,8 @@ fn all_edge_types() -> Vec<EdgeType> {
         EdgeType::ActionValidates,
         EdgeType::ActionLoadsData,
         EdgeType::DependsOn,
+        EdgeType::ExecutesScript,
+        EdgeType::LinksScript,
     ]
 }
 

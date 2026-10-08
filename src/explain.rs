@@ -1470,6 +1470,11 @@ pub fn build_explain_output(graph: &dyn GraphReadStore, node_id: &str) -> Result
         crate::graph::NodeType::Condition => {
             explain_condition_graph(graph, &node, outgoing, incoming, false)?
         }
+        // 旧动词不解读脚本；脚本事实在图里，交给只读 GQL 查询
+        crate::graph::NodeType::Script => anyhow::bail!(
+            "--explain does not interpret Script nodes ({}); query the graph with --gql instead",
+            node.id
+        ),
     };
     Ok(value)
 }
@@ -1534,6 +1539,10 @@ pub fn explain_node_graph(graph: &dyn GraphReadStore, node_id: &str, human: bool
             crate::graph::NodeType::Condition => {
                 let _ = explain_condition_graph(graph, &node, outgoing, incoming, true)?;
             }
+            crate::graph::NodeType::Script => anyhow::bail!(
+                "--explain does not interpret Script nodes ({}); query the graph with --gql instead",
+                node.id
+            ),
         }
         Ok(())
     } else {

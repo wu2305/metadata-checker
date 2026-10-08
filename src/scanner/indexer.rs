@@ -158,6 +158,8 @@ fn ledger_from_parsed_content(
                     node.path == logical_path
                 }
                 NodeType::Model | NodeType::Field => is_page_local(&node.id),
+                // 页面从不定义脚本：脚本节点只由脚本文件自己的处理产出
+                NodeType::Script => false,
             }
         } else if is_tbl {
             if let Some(ref primary) = tbl_primary_model {
