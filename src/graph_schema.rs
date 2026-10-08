@@ -230,7 +230,7 @@ const NODE_TYPES: &[NodeTypeSchema] = &[
         summary: "A SuperPage file (.spg), or a page that another page refers to.",
         id_prefixes: &["page"],
         id_formats: &["page:<project-relative path>"],
-        path_meaning: "The .spg path. A referenced page is created from the link target even when no file exists there, so a Page node is a dangling reference unless a scanned file backs it (see the dangling-page rule); a missing Contains edge alone does not tell, since a scanned page with no canvas has none.",
+        path_meaning: "The .spg path. In a project scan every Page node has a scanned file behind it: a link or embed whose target file does not exist produces no Page node (see absent_when of ActionNavigates and EmbedsPage). A graph built by an older scanner version may still hold a dangling Page until its next scan. A missing Contains edge alone does not tell whether the page was scanned, since a scanned page with no canvas has none.",
         meta_keys: &[],
         meta_open: false,
         notes: "No meta.",
@@ -792,7 +792,7 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
             SPG,
             "A link action with targetType app whose path is an index into referenceResources that resolves to a .spg page path: the target Page node is upserted, then Action -> Page.",
         )],
-        absent_when: "A link whose target cannot be resolved to a page path (index out of range, an absolute path, a URI, an unknown $-prefix, a target that is not .spg) produces no edge and no Page node; the gap is recorded as a SCANNER_UNRESOLVED_REFERENCE occurrence in the IndexState record scanner_entry:<page path> (a link with no path at all is recorded too, as a missing index). A link whose path resolves but whose file does not exist still produces the edge, to a Page node that no scanned file backs (no file_state record). Absence is not proof there is no navigation. The query-time diagnostic UNRESOLVED_PAGE_NAVIGATION only fires for a target node that is missing from the graph, which this scanner never leaves, so it does not cover either case; use the scanner_entry record.",
+        absent_when: "A link whose target cannot be resolved to a page path (index out of range, an absolute path, a URI, an unknown $-prefix, a target that is not .spg) produces no edge and no Page node; the gap is recorded as a SCANNER_UNRESOLVED_REFERENCE occurrence in the IndexState record scanner_entry:<page path> (a link with no path at all is recorded too, as a missing index). A link whose path resolves but whose file is not among the scanned files is treated the same way: no edge, no Page node, no param node under the missing target, and the occurrence's detail names the resolved path. Absence is not proof there is no navigation. The query-time diagnostic UNRESOLVED_PAGE_NAVIGATION only fires for a target node that is missing from the graph, which this scanner never leaves, so it does not cover any of these cases; use the scanner_entry record.",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::PassesParam,
@@ -952,7 +952,7 @@ const EDGE_TYPES: &[EdgeTypeSchema] = &[
             SPG,
             "An embedsuperpage component whose resPath is an index into referenceResources that resolves to a .spg page path: the target Page node is upserted, then Component -> Page.",
         )],
-        absent_when: "An embed whose target cannot be resolved (or has no resPath) produces no edge; the gap is recorded as a SCANNER_UNRESOLVED_REFERENCE occurrence in the IndexState record scanner_entry:<page path>. One whose path resolves but whose file does not exist produces the edge to a Page node that no scanned file backs (no file_state record).",
+        absent_when: "An embed whose target cannot be resolved (or has no resPath) produces no edge; the gap is recorded as a SCANNER_UNRESOLVED_REFERENCE occurrence in the IndexState record scanner_entry:<page path>. One whose path resolves but whose file is not among the scanned files is treated the same way: no edge and no Page node, and the occurrence's detail names the resolved path.",
     },
     EdgeTypeSchema {
         edge_type: EdgeType::DependsOn,
@@ -1156,7 +1156,7 @@ const INTERPRETATION_RULES: &[InterpretationRule] = &[
     },
     InterpretationRule {
         id: "dangling-page",
-        rule: "A Page node with no Contains edge is not necessarily a reference to a missing file: a scanned page with no canvas has none either. A page was scanned only if an IndexState record with key 'file_state:<path>' exists for it. A Page node without that record was created from a link or embed target, and no scanned file backs it.",
+        rule: "A Page node with no Contains edge is not necessarily a reference to a missing file: a scanned page with no canvas has none either. In a project scan every Page node is backed by a scanned file, which has an IndexState record with key 'file_state:<path>'; a link or embed to a page that does not exist produces no Page node (see absent_when of ActionNavigates and EmbedsPage). A graph built by an older scanner version may still hold Page nodes without that record until its next scan, which removes them.",
     },
     InterpretationRule {
         id: "depends-on-is-overloaded",
@@ -1224,7 +1224,7 @@ const LABELS: GraphLabels = GraphLabels {
     internal_records: &[
         IndexStateRecord {
             key_form: "file_state:<file path>",
-            meaning: "One per scanned file, including a page with no canvas. Its presence is the evidence that the file was scanned; a Page node without it was created from a link or embed target.",
+            meaning: "One per scanned file, including a page with no canvas. Its presence is the evidence that the file was scanned; a Page node without it was left by an older scanner version, which created Page nodes for link or embed targets whose files do not exist.",
             value_shape: "JSON: file_path, file_hash, mtime, size, node_ids (the node ids the file produced).",
         },
         IndexStateRecord {

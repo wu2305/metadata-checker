@@ -210,11 +210,12 @@ fn incremental_rescan_reparses_only_the_changed_file() {
     };
     drop(first);
 
-    // 改 b.spg：仅它一份文件应被判脏。
+    // 改 b.spg：它自己判脏；内嵌它的 a.spg 没改，但批删 b 的节点会带走 a 指向 b 的边，
+    // 所以 a 作为引用者随之重解析（见 `extend_dirty_with_page_referrers`）。tbl 不受牵连。
     let updated_b = page_b().replace("\"value\": \"B\"", "\"value\": \"B2\"");
     write(&project, "app/b.spg", &updated_b);
     let second = ProjectIndexer::scan_with_diagnostics(&project, &db).expect("rescan");
-    assert_eq!(second.report.dirty, 1, "只有 b.spg 应被判脏");
+    assert_eq!(second.report.dirty, 2, "b.spg 与内嵌它的 a.spg 应被判脏");
     assert_eq!(second.report.indexed, 3);
     assert_eq!(second.report.deleted, 0);
 

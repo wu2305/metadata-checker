@@ -235,6 +235,14 @@ fn unresolved_references_create_no_edge_no_ghost_page_and_one_record_each() -> a
         ]}
     });
     std::fs::write(page_dir.join("首页.spg"), serde_json::to_string(&page)?)?;
+    // 唯一可解析的目标 `$TAPP:/预约/编辑.spg` 要真实存在：目标文件不存在的引用另有
+    // `scanner_missing_page_target_tests` 覆盖。
+    let target_dir = project_dir.join("app/售后.app/预约");
+    std::fs::create_dir_all(&target_dir)?;
+    std::fs::write(
+        target_dir.join("编辑.spg"),
+        r#"{"canvas": {"components": [{"id": "ok1", "type": "button"}]}}"#,
+    )?;
     let db_path = project_dir.join("graph.db");
     ProjectIndexer::scan_with_diagnostics(&project_dir, &db_path)?;
 
@@ -484,7 +492,7 @@ fn old_format_fingerprint_forces_a_rescan_after_a_semantics_change() -> anyhow::
     let current = states.get("a.spg").expect("a.spg 的文件状态").clone();
     assert_eq!(
         &current.file_hash[..3],
-        "s2-",
+        "s3-",
         "指纹应带扫描语义版本: {}",
         current.file_hash
     );
