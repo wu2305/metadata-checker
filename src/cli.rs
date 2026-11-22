@@ -190,6 +190,28 @@ pub struct Cli {
 
     #[arg(
         long,
+        value_name = "QUERY",
+        help = "Run a read-only GQL query on a .grafeo graph (--graph-db-path). Schema: nodes (:Node {id,node_type,path,name,meta,origin_file}); edges [:<EdgeType> {field_path,meta,origin_file}], e.g. MATCH (a:Node)-[r:Reads]->(b:Node) RETURN a.id, b.id, r.field_path. Only MATCH/OPTIONAL/UNWIND/FOR/RETURN statements; writes and LOAD are rejected",
+        long_help = crate::graph_schema::gql_long_help()
+    )]
+    pub gql: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "N",
+        default_value = "200",
+        help = "Maximum rows returned by --gql; the result carries truncated=true when more rows matched (default: 200)"
+    )]
+    pub gql_max_rows: usize,
+
+    #[arg(
+        long,
+        help = "Print the graph schema contract (node and edge types, meta keys, id formats, interpretation rules, GQL dialect notes) as JSON; with --human, as Markdown. Needs no project or graph"
+    )]
+    pub graph_schema: bool,
+
+    #[arg(
+        long,
         hide = true,
         value_name = "ID",
         help = "Output minimal closure context around a target node (requires --project-dir)"

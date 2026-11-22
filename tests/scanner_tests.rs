@@ -1002,3 +1002,26 @@ fn test_condition_nodes_in_graph() {
 
     let _ = std::fs::remove_file(&db_path);
 }
+
+/// 回归：discover_files 必须按路径排序，不能依赖文件系统的 read_dir 枚举序，
+/// 否则跨页同名局部实体（后写覆盖先写）的建图结果会随平台漂移。
+#[test]
+fn test_discover_files_is_sorted_regardless_of_creation_order() {
+    let root = std::env::temp_dir().join("metadata-checker-test-discover-sorted");
+    let _ = std::fs::remove_dir_all(&root);
+    // 故意倒序创建，覆盖「创建序 == 枚举序」的文件系统
+    for rel in ["z/last.spg", "m/mid.tbl", "a/first.spg", "root.tbl"] {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).expect("create dir");
+        std::fs::write(&path, "{}").expect("write file");
+    }
+
+    let discovered = metadata_checker::scanner::indexer::ProjectIndexer::discover_files(&root)
+        .expect("discover_files failed");
+    let mut expected = discovered.clone();
+    expected.sort();
+    assert_eq!(discovered, expected, "discover_files 结果应按路径排序");
+    assert_eq!(discovered.len(), 4, "应发现全部 4 个 spg/tbl 文件");
+
+    let _ = std::fs::remove_dir_all(&root);
+}

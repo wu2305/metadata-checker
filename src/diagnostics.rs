@@ -18,6 +18,11 @@ pub const IMPACT_BLOCKING: &str = "blocking";
 /// 初始诊断 code
 pub const CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY: &str = "SCANNER_UNRECOGNIZED_CONTAINER_KEY";
 pub const CODE_SCANNER_DUPLICATE_COMPONENT_ID: &str = "SCANNER_DUPLICATE_COMPONENT_ID";
+/// 页面里的跨页引用（embedsuperpage / link 动作）解析不到一个 `.spg` 页面：前缀不认识、
+/// 绝对路径、越出项目根、目标不是 `.spg`，或 `referenceResources` 下标越界。
+/// 该引用对应的边**没有建**——图里缺这条边不等于页面没有这个引用。
+pub const CODE_SCANNER_UNRESOLVED_REFERENCE: &str = "SCANNER_UNRESOLVED_REFERENCE";
+
 /// M58.3 复核返修：diff-refresh 刷新 live scanner 诊断缓存失败，
 /// 已透出的 SCANNER_* 诊断可能陈旧
 pub const CODE_SCANNER_DIAGNOSTICS_REFRESH_FAILED: &str = "SCANNER_DIAGNOSTICS_REFRESH_FAILED";
@@ -66,6 +71,7 @@ pub fn answer_impact_for(code: &str) -> &'static str {
         | "GRAPH_PROJECT_BINDING_MISMATCH" => IMPACT_BLOCKING,
         CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY => IMPACT_PARTIAL,
         CODE_SCANNER_DUPLICATE_COMPONENT_ID => IMPACT_PARTIAL,
+        CODE_SCANNER_UNRESOLVED_REFERENCE => IMPACT_PARTIAL,
         // 诊断缓存可能陈旧：涉及 SCANNER_* 诊断的结论只能视为部分可靠
         CODE_SCANNER_DIAGNOSTICS_REFRESH_FAILED => IMPACT_PARTIAL,
         // 诊断整体缺失（加载失败）：同上，涉及 SCANNER_* 覆盖面的结论只能视为部分可靠
@@ -153,6 +159,7 @@ pub fn severity_for(code: &str) -> DiagnosticSeverity {
         // ---- Warning：数据/配置疑似有问题（默认档，显式列出以固定意图） ----
         CODE_SCANNER_UNRECOGNIZED_CONTAINER_KEY
         | CODE_SCANNER_DUPLICATE_COMPONENT_ID
+        | CODE_SCANNER_UNRESOLVED_REFERENCE
         | CODE_SCANNER_DIAGNOSTICS_REFRESH_FAILED
         | CODE_SCANNER_DIAGNOSTICS_LOAD_FAILED
         | CODE_GRAPH_DB_NODE_DECODE_FAILED

@@ -37,6 +37,9 @@ pub enum GraphStoreError {
     Corrupted { reason: String },
     /// 不支持的操作
     UnsupportedOperation { message: String },
+    /// 写入的节点或边违反 `graph_schema.rs` 契约表（L0 写入校验）；
+    /// `message` 已含源文件、节点或边与具体原因。
+    SchemaViolation { message: String },
 }
 
 impl GraphStoreError {
@@ -54,6 +57,7 @@ impl GraphStoreError {
             GraphStoreError::PermissionDenied { .. } => "GRAPH_DB_PERMISSION_DENIED",
             GraphStoreError::Corrupted { .. } => "GRAPH_DB_CORRUPTED",
             GraphStoreError::UnsupportedOperation { .. } => "GRAPH_DB_UNSUPPORTED_OPERATION",
+            GraphStoreError::SchemaViolation { .. } => "GRAPH_SCHEMA_VIOLATION",
         }
     }
 }
@@ -94,6 +98,9 @@ impl fmt::Display for GraphStoreError {
             GraphStoreError::UnsupportedOperation { message } => {
                 write!(f, "Graph store unsupported operation: {}", message)
             }
+            GraphStoreError::SchemaViolation { message } => {
+                write!(f, "Graph schema violation: {}", message)
+            }
         }
     }
 }
@@ -108,6 +115,94 @@ impl std::error::Error for GraphStoreError {}
 /// 只是惯例名，没有格式约束。
 pub fn is_grafeo_db_path(path: &std::path::Path) -> bool {
     path.extension().is_some_and(|ext| ext == "grafeo")
+}
+
+/// 只读 GQL 查询的失败：稳定错误码 + 面向调用方（LLM）的说明。
+///
+/// 独立于 `GraphStoreError`：后者描述存储层故障，而 GQL 调用方要靠 `code`
+/// 决定下一步——`GQL_READ_ONLY` 说明语句本身被禁止（换成读查询），
+/// `GQL_QUERY_INVALID` 说明语法/语义有误（按错误位置改写），
+/// `GQL_QUERY_TIMEOUT` 说明查询太重（收窄条件），
+/// `GQL_BACKEND_UNSUPPORTED` 说明当前图库不是 `.grafeo`。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GqlError {
+    /// 稳定错误码
+    pub code: &'static str,
+    /// 说明文本（引擎原始报错 / 拒绝原因）
+    pub message: String,
+}
+
+impl GqlError {
+    pub fn new(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for GqlError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.code, self.message)
+    }
+}
+
+impl std::error::Error for GqlError {}
+
+/// 只读 GQL 查询的结果表（M59-3 C4）。
+///
+/// 与具体图后端无关：值已经从引擎类型转成 JSON，runtime 与 CLI 只认这张表。
+/// `total_rows` 是引擎实际返回的行数，`rows` 最多保留调用方给的 `max_rows` 行，
+/// 超出部分丢弃并把 `truncated` 置位——LLM 调用方据此知道结果不完整，
+/// 应该收窄查询而不是把截断后的表当全集。
+#[derive(Debug, Clone, PartialEq)]
+pub struct GqlRows {
+    /// RETURN 子句的列名
+    pub columns: Vec<String>,
+    /// 保留下来的行，每行与 `columns` 一一对应
+    pub rows: Vec<Vec<serde_json::Value>>,
+    /// 引擎返回的总行数（截断前）
+    pub total_rows: usize,
+    /// `rows` 是否被 `max_rows` 截断
+    pub truncated: bool,
+}
+
+impl GqlRows {
+    /// 结构化 JSON 形态：`{columns, rows, row_count, total_rows, truncated}`。
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "columns": self.columns,
+            "rows": self.rows,
+            "row_count": self.rows.len(),
+            "total_rows": self.total_rows,
+            "truncated": self.truncated,
+        })
+    }
+
+    /// 人类可读的 TSV：首行列名，其后每行一条记录；非字符串值按 JSON 文本输出。
+    /// 制表符与换行在单元格里会破坏列对齐，统一转义成 `\t` / `\n`。
+    pub fn to_tsv(&self) -> String {
+        fn cell(value: &serde_json::Value) -> String {
+            let text = match value {
+                serde_json::Value::String(text) => text.clone(),
+                other => other.to_string(),
+            };
+            text.replace('\t', "\\t").replace('\n', "\\n")
+        }
+        let mut out = self.columns.join("\t");
+        for row in &self.rows {
+            out.push('\n');
+            out.push_str(&row.iter().map(cell).collect::<Vec<_>>().join("\t"));
+        }
+        if self.truncated {
+            out.push_str(&format!(
+                "\n# 已截断：返回 {} 行，仅显示前 {} 行",
+                self.total_rows,
+                self.rows.len()
+            ));
+        }
+        out
+    }
 }
 
 /// 节点边的视图（owned，避免 trait 生命周期复杂化）
@@ -164,6 +259,13 @@ pub trait GraphWriteStore {
 
     /// 按 ID 列表删除节点
     fn remove_nodes_by_ids(&mut self, node_ids: &[String]) -> GraphStoreResult<()>;
+
+    /// 已写入节点的类型；节点不存在返回 `None`。
+    ///
+    /// 写入校验（[`crate::graph_write_guard::SchemaGuard`]）要靠它解析边的端点类型：
+    /// 增量扫描时边可以指向别的文件早已写入的节点，只看本次写过的节点不够。
+    /// 只读取类型，不构造整个 `Node`（Grafeo 侧要解析 meta 文本，这里不需要）。
+    fn node_type_of(&self, node_id: &str) -> GraphStoreResult<Option<crate::graph::NodeType>>;
 }
 
 /// 组合读写 trait（用于需要同时读写的场景）

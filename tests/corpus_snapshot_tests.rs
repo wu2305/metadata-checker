@@ -2,7 +2,7 @@
 
 use metadata_checker::output::AiOutput;
 use serde_json::json;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 static CLI_LOCK: Mutex<()> = Mutex::new(());
@@ -232,19 +232,40 @@ fn execute_case(case: &SnapshotCase) -> serde_json::Value {
 }
 
 /// 为每个 case 生成或验证 snapshot
+/// 删除残留的图数据库及其锁文件；只容忍“本来就不存在”，其余错误直接失败。
+fn remove_stale_graph_db(db_path: &Path) {
+    let lock_path = PathBuf::from(format!("{}.lock", db_path.display()));
+    for path in [db_path, lock_path.as_path()] {
+        let result = if path.is_dir() {
+            std::fs::remove_dir_all(path)
+        } else {
+            std::fs::remove_file(path)
+        };
+        match result {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!(
+                "failed to remove stale graph db {}: {error}",
+                path.display()
+            ),
+        }
+    }
+}
+
 #[test]
 fn test_snapshot_cases() {
     let update_mode = std::env::var("UPDATE_CORPUS_SNAPSHOTS")
         .map(|v| v == "1" || v == "true")
         .unwrap_or(false);
 
-    // P0: 确保图数据库已构建，不依赖被 git 忽略的 .metadata-checker.graphdb
+    // 每次都从零重建图数据库：.metadata-checker.graphdb 被 git 忽略，残留的本地库会被
+    // 增量扫描原样复用，快照因此随本地旧状态（例如旧的文件扫描序）漂移，
+    // 本地通过、干净环境失败（或反过来），重生成快照时还会把旧状态固化进去。
     let project_dir = PathBuf::from("tests/fixtures/test_project");
     let db_path = PathBuf::from("tests/fixtures/test_project/.metadata-checker.graphdb");
-    if !db_path.exists() || update_mode {
-        metadata_checker::scanner::scan_project(&project_dir, &db_path)
-            .expect("scan_project must succeed on test_project");
-    }
+    remove_stale_graph_db(&db_path);
+    metadata_checker::scanner::scan_project(&project_dir, &db_path)
+        .expect("scan_project must succeed on test_project");
 
     let cases = load_snapshot_cases();
     assert!(!cases.is_empty(), "snapshot_cases.json must have cases");

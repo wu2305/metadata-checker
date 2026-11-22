@@ -98,10 +98,15 @@ mod tbl;
 /// 递归收集目录下所有 .spg 和 .tbl 文件
 mod utils;
 
-#[cfg(any(test, feature = "cli-local"))]
-pub use spg::scan_raw_diagnostics;
 pub use spg::{
-    PageIdentityMode, process_spg_file_from_value, process_spg_file_from_value_with_identity,
+    PageIdentityMode, ScanOccurrence, process_spg_file_from_value,
+    process_spg_file_from_value_with_identity, process_spg_file_in_catalog,
+    process_spg_file_with_schema,
 };
-pub use tbl::process_tbl_file_from_string;
-pub use utils::{add_edge_with_meta, add_identified_node, add_node, resolve_reference_path};
+#[cfg(any(test, feature = "cli-local"))]
+pub use spg::{scan_raw_diagnostics, scan_raw_occurrences};
+pub use tbl::{process_tbl_file_from_string, process_tbl_file_with_schema};
+pub use utils::{
+    PageCatalog, ReferenceUnresolved, add_edge_with_meta, add_identified_node, add_node,
+    resolve_reference_path, resolve_reference_path_in, resolve_reference_target,
+};

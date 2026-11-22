@@ -947,3 +947,85 @@ C1 的 +8.6KB 是「链接器整体丢包」的假读数；+621KB 才是 `edge +
 - diff-refresh 对 `.grafeo` 库仍是「查询可读、持久化不可写」的半开边界，
   `PersistFn` fail-closed 兜底；d2 级增量刷新写图仍是 D 阶段待办。
 - C4 投影、C5 wasm、ownership-on-grafeo 未动。
+
+## 2026-10-01 阶段 C4：只读 GQL 直查（取代手写表投影）
+
+### 决策与做法
+
+用户 2026-10-01 决定：C4 不再手写「WHERE + 投影 + LIMIT」迷你语言，改为把引擎自带 GQL 开给
+LLM 直接查询。落地为 CLI `--gql <QUERY>` / `--gql-max-rows <N>`（默认 200，超出置
+`truncated`），JSON 与 TSV（`--human`）两种输出，失败为 `{"ok":false,"error":{"code","message"}}`。
+实现：`GrafeoGraphStore::query_gql_read_only`（`src/graph_grafeo.rs`）→
+`RuntimeGraphBackend::query_gql_read_only`（redb 变体返回 `GQL_BACKEND_UNSUPPORTED`）。
+
+### 更正：GQL 不需要 `lpg`
+
+此前的口径是「没开 `lpg` 所以二进制里没有查询语言」。实际 `edge` 特性集已经带上 `gql`
+（`grafeo` 的 `edge = ["grafeo-engine/lpg", "gql", "regex-lite"]`），GQL 解析器与执行入口
+一直在依赖里，只是 C1–C3 没有任何代码调用，链接器把它整体丢掉了。`lpg` 额外带来的只是
+Cypher / Gremlin / SQL-PGQ 解析器与完整 `regex`，C4 一个都用不到。因此 **`Cargo.toml` 的
+grafeo 特性集保持 `["edge", "storage"]` 不变**。用户给的是「开 `lpg`」这条手段；目标是
+「LLM 能直接 GQL 查」，该目标不需要 `lpg`，下表同时给了开 `lpg` 的实测体积。
+
+### 只读边界（本轮的主要工作）
+
+只读由两道闸共同保证：
+
+1. **引擎闸**：`session_with_role(Role::ReadOnly)`。不能用文件级只读——runtime 用读写
+   `open()` 打开 `.grafeo`（WAL 回放需要）。测试对 12 种「起始关键字能过形态闸」的写入
+   （`MATCH … SET/REMOVE/DELETE/DETACH DELETE/INSERT/CREATE`、`UNWIND/FOR/OPTIONAL MATCH …`）
+   断言错误码是 `GQL_READ_ONLY` **且图指纹（全部节点字段 + 邻接）不变**。
+   首版断言只写了 `is_err()`，加强为必须是只读拒绝后，立刻暴露 `WITH … INSERT` 其实是
+   语法错误（引擎 GQL 不允许 `WITH` 开头）——「报错」不等于「被只读会话挡下」。
+2. **形态闸**：起始关键字白名单 `MATCH/OPTIONAL/UNWIND/FOR/RETURN` + 全文出现 `LOAD` 一词即拒。
+   **这道闸不是纵深防御，是必需品**：实测引擎只读会话放行 `LOAD CSV FROM '<本地路径>'`，
+   `RETURN row[0]` 直接返回了测试文件里的 `top-secret-token`——LLM 能读任意本地文本文件。
+   判定对全文做 ASCII 单词切分而不按位置/词法判断（`LOAD` 在引擎词法里是普通标识符，
+   可出现在任意子句位置，反引号形式同样成立），代价是含 `load` 一词的合法查询会被误拒，
+   这是有意选择的安全方向。
+
+### 引擎侧缺陷与限制（实测，未在本层修）
+
+- **浮点字面量在聚合之后的投影里被返回成 `Int64(位模式)`**：`MATCH (n:Node) RETURN count(n) AS
+  total, 1.5 AS ratio` → `4609434218613702656`（1.5 的 IEEE 位模式）；单独 `RETURN 1.5` 正常。
+  图属性全是字符串，只影响 LLM 自写的浮点字面量，无法可靠识别，故只记录。
+- **重查询**：178 节点语料上四路笛卡尔积（约 1e9 行）在 6 GB 地址空间上限下 30.8 s 返回
+  `GQL_QUERY_TIMEOUT`，未 OOM；三路 `count(*)`（563 万行）0.28 s。超时沿用引擎默认 30 s，
+  未单独配置；结果行数上限只在查询返回之后截断，不限制引擎内部物化。
+
+### 验证
+
+- 新增 `tests/m59_c4_grafeo_gql_tests.rs` **21/21**：投影/遍历/多跳/聚合/截断/JSON+TSV、
+  持久库重开、全部写入形态被拒且图不变、LOAD 各写法（大小写、反引号、夹在读子句后）被拒且错误
+  文本不带出文件内容、语法错误/超长查询的错误码，以及 CLI 端到端（对 `tests/fixtures/test_project`
+  建 `.grafeo`，判据取自 `--build-graph` 自己的节点数；写入被拒后重新打开节点数不变；redb 库报
+  `GQL_BACKEND_UNSUPPORTED`）。
+- 影响面测试（`--lib`、`m59_*`、`scanner_tests`、`corpus_snapshot_tests`、
+  `m58_3_command_surface_tests`、`output_parser_tests`、`core_feature_tests`）全绿；
+  `cargo check`（default / `--no-default-features --features cli-local` / wasm32 `browser-wasm`）
+  与 `cargo check --benches` 通过，`cargo fmt --check` 通过；无新增 warning。
+
+### 实测体积（`cargo build --release`，同工具链，各构建一次）
+
+| 构建 | 字节 | 相对基线 |
+|---|---|---|
+| A. 基线（`0f0a1a5`，C3 + PR #1 修复，无 GQL 调用） | 6,595,888 | 基线 |
+| B. 本改动（`edge + storage`，调用 `Session::execute`） | 8,087,448 | **+1,491,560 B（+22.6%）** |
+| C. B 再加 grafeo `lpg`（仅作对照，未采用） | 8,034,248 | +1,438,360 B（比 B 小 53 KB，属链接噪声量级） |
+
+- **+1.49 MB 的来源**：GQL 解析/规划/执行一直在依赖里，但 C1–C3 没有调用点，LTO 整体丢弃；
+  C4 调用 `Session::execute` 后它被真正链进二进制。这是「让 LLM 直接用 GQL」的真实代价，
+  不是依赖变化（本轮零新增依赖，`Cargo.lock` 不变）。
+- **`lpg` 在 release + LTO 下体积中性**：Cypher/Gremlin/SQL-PGQ 入口没有调用点，同样被丢弃。
+  所以「不开 `lpg`」的理由不是体积，而是它对 C4 没有任何作用，并且会多编译若干 crate、
+  多一条 `regex` 依赖。若之后要让 LLM 直接写 Cypher，才有开它的理由——但 Cypher 翻译器同样
+  有 `LOAD CSV`，需要另一套形态闸，不能复用本轮的结论。
+- 体积规则（AGENTS.md）：每次影响依赖/feature 的 PR 记录实测体积与回归理由——本表即记录；
+  回归理由为上条。
+
+### 边界
+
+- 仅 CLI。stdio / MCP 工具契约没有新增 `--gql` 动词：该表面被 M58 评测固定，增加动词会改变
+  模型可见的工具列表，需单独决定。
+- 仅 `.grafeo` 图库；`.grafeo` 上 `reload()` 仍显式拒绝（C3 边界不变）。
+- 形态闸对「变量/属性/字面量里含 `load` 一词」的合法查询会误拒（有意取舍，见上）。

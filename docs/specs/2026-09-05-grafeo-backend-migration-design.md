@@ -463,7 +463,10 @@ B5 仍记录的跨文件边丢失与占位节点残留必须在 A3 修复。
         C2 直写导入路径（create_node_with_props / create_edge，自持 NodeId）
            —— 实测比逐条 Cypher 快 60 倍；建 property index
         C3 链路查询动词：覆盖 22 个 EdgeType 里的 21 个，每类边自己的投影规则
-        C4 表投影层（节点层）：只读视图 + WHERE + 投影 + LIMIT + TSV/JSON
+        C4 只读 GQL 直查（**2026-10-01 用户决策，取代原「表投影层」设计**）
+           —— 原设计是手写 WHERE/投影/LIMIT 迷你语言；改为把引擎自带 GQL 开给 LLM，
+              不再自造查询语言。只读由「引擎只读会话 + 形态闸」两道保证，
+              见 journal C4 小节与 `tests/m59_c4_grafeo_gql_tests.rs`
         C5 wasm32 实测：cargo build --target wasm32-unknown-unknown --features browser-wasm
 
 阶段 D  验收与退役

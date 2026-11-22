@@ -279,7 +279,8 @@ pub fn build_tbl_output(meta: &TblMetadata, budget: &str) -> AiOutput {
     }
 
     // Diagnostics
-    if meta.is_dataflow && meta.dataflow_outputs.is_empty() {
+    // 显式空串是未落表数据流（有意没有输出表），不是缺失，不告警
+    if meta.is_dataflow && meta.dataflow_outputs.is_empty() && !meta.unlanded {
         let mut diag = crate::diagnostics::envelope_diagnostic(
             "DATAFLOW_NO_OUTPUT",
             1,

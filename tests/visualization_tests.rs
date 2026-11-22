@@ -160,6 +160,27 @@ fn test_ready_envelope_generates_visual_graph() {
 }
 
 #[test]
+fn test_script_evidence_keeps_the_script_node_kind() {
+    let mut output = AiOutput::new(OutputKind::PageQuery, json!({}));
+    output.evidence.push(
+        Evidence::new("Backend script", "Handles the request")
+            .with_node_id("script:app/data/script/a.action.ts")
+            .with_edge_type("ExecutesScript"),
+    );
+
+    let graph = VisualGraphBuilder::from_ai_output(&output, &VisualGraphOptions::default());
+    let node = graph
+        .nodes
+        .iter()
+        .find(|n| n.id.starts_with("script:"))
+        .expect("graph should contain the script node");
+    assert!(matches!(
+        node.kind,
+        metadata_checker::visualization::options::NodeKind::Script
+    ));
+}
+
+#[test]
 fn test_error_envelope_generates_diagnostic_only_graph() {
     let mut output = AiOutput::new(OutputKind::PageQuery, json!({}));
     output.diagnostics.push({

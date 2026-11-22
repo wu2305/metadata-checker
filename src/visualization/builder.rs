@@ -764,6 +764,8 @@ impl VisualGraphBuilder {
             NodeKind::Field
         } else if node_id.starts_with("action:") || node_id.starts_with("Action") {
             NodeKind::Action
+        } else if node_id.starts_with("script:") || node_id.starts_with("Script") {
+            NodeKind::Script
         } else if edge_type
             .as_ref()
             .map(|s| s.contains("Condition"))
@@ -783,6 +785,7 @@ impl VisualGraphBuilder {
             "model" => NodeKind::Model,
             "field" => NodeKind::Field,
             "action" => NodeKind::Action,
+            "script" => NodeKind::Script,
             "condition" => NodeKind::Condition,
             _ => NodeKind::Component,
         }

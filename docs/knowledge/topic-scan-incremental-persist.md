@@ -113,11 +113,29 @@ IndexCommit { file_states, dirty_nodes, deleted_nodes, checkpoint, delta, scanne
 |------|------|
 | `SCANNER_UNRECOGNIZED_CONTAINER_KEY` | SPG 有未识别容器键 |
 | `SCANNER_DUPLICATE_COMPONENT_ID` | 同文件重复组件 id |
+| `SCANNER_UNRESOLVED_REFERENCE` | SPG 的 embedsuperpage / link(app) 引用解析不到 `.spg` 页面（该引用不建边、不造 Page 节点） |
 | `SCANNER_FILE_PARSE_FAILED` | TBL 解析失败（`ParseFailure`） |
 | `SCANNER_DIAGNOSTICS_LOAD_FAILED` | runtime 加载期读诊断失败 |
 | `SCANNER_DIAGNOSTICS_REFRESH_FAILED` | diff-refresh 侧刷新失败 |
 
 - per-file 计数序列化为 bytes，随 `IndexCommit.scanner_entries` **与图同事务落库**（`src/scanner/indexer.rs:134`）。
+- **逐次记录（`ScanOccurrence`，本条以 `e9030a2` 为准（实现该行为的提交），行号未逐条核验）**：除计数和每类首个样例外，per-file entry
+  还带 `occurrences`——每处出现一条 `{code, location{source_file,node_id,json_path}, detail}`。
+  由 `ScanDiagnostics::record_unrecognized` / `record_duplicate` 与计数同步维护，解析失败走 `ScanDiagnostics::parse_failure`。
+  读取走 `ProjectIndexer::merge_scanner_occurrence_entries`（路径字典序、文件内出现顺序）。
+  **聚合信封不读它**：`ScanDiagnostics::merge` 不合并记录，全库聚合内存不随出现次数增长；
+  只构造组件上下文的遍历（`collect_component_contexts`）关闭记录构造，不白分配。
+  **旧库 entry 没有 `occurrences`**（`#[serde(default)]`）：聚合照常，逐次接口把这些文件列入 `legacy_files`，
+  不当作「无诊断」；该文件重新解析后补齐。损坏 entry 报错并带路径。
+  覆盖测试：`tests/scanner_occurrence_tests.rs`。
+- **跨页引用解析（本条以本次提交为准，行号未逐条核验）**：`resolve_reference_target`（`src/scanner/utils.rs`）按前缀展开：`$TAPP:` = 当前应用目录（`app/<x>.app/`），
+  `$APP:` = `app/`，`$ANA:` / `$DATA:` = 项目根同级目录，无前缀 = 相对当前文件并归一 `..`；绝对路径、未知前缀、越出根、目标非 `.spg`、下标越界一律 `ReferenceUnresolved`。`$APP:` / `$ANA:` / `$DATA:` 以项目根为锚（根取 `app/<x>.app` 之前的段，不在应用下时取第一个 `ana`/`data` 目录段之前的段，都没有才 `NoAppRoot`）；`$TAPP:` 必须有当前应用。link(app) 没有 `path`、embedsuperpage 没有 `resPath`（缺失或 null）记 `MissingIndex`，autocrm 里有 27 处这样的未配置完成的 link。
+  建边与诊断共用 `page_reference_sites`，诊断由 `scan_page_reference_failures` 在 per-file entry 里采集。仍可能留下指向磁盘上不存在文件的 Page 节点（解析正确但目标缺失），
+  需要文件集合才能判定，尚未处理。
+  **升级遗留**：文件指纹带 `SCANNER_SEMANTICS_VERSION`（`s2-` 前缀，`src/scanner/indexer.rs`），升级后每个文件首次扫描判脏并按新规则重建；
+  但被引用而生成的目标 Page 桩节点不在该文件的 `node_ids` 里（既有行为），增量删除只清 `FileState.node_ids`，所以**旧解析器留下的畸形 Page 桩不会被清掉**。
+  要得到干净的图，升级后用新的 `--graph-db-path` 重建。通用的「无文件、无入边的 Page 桩」回收尚未实现。
+- **未落表数据流**：`dbTableName` 为空串是合法形态（即时取数、无物理输出表），模型节点 meta 带 `landed: false`，不建 `OutputsTo` 边，不产生诊断；缺省该键的表不做此断言。覆盖测试：`tests/scanner_reference_resolution_tests.rs`。
 - 删除文件与「对账出的陈旧路径」经 `scanner_deleted_paths` 同事务移除（`src/scanner/indexer.rs:221`、`src/scanner/indexer.rs:250`）。
 - **陈旧对账是当前已实现的修复机制，不是未修复缺陷**。
   `stale_scanner_diagnostic_paths`（`src/scanner/indexer.rs:221`）处理两个场景：

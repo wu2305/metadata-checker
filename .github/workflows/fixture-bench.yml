@@ -1,0 +1,87 @@
+# fixture Criterion bench：移植自 .cnb.yml 的 `.fixture_bench_ci`（只挂在 main.push 上）。
+#
+# 只依赖仓库内 tests/fixtures，不需要真实项目语料，所以可以在 GitHub 上原样运行。
+# 结果经 tools/run-bencher-criterion-ci.mjs 上报 Bencher；该脚本把分支名读自
+# `CNB_BRANCH`，这里直接用同名环境变量传入 GitHub 分支，避免改脚本。
+#
+# 启用条件：仓库 variable `BENCHER_PROJECT`（项目 slug）已配置；secret `BENCHER_API_KEY`
+# 缺失时脚本只跑 bench、跳过上报。未配置 `BENCHER_PROJECT` 时整条 workflow 跳过，
+# 避免在共享 runner 上白跑一遍没人看的 bench。可用 workflow_dispatch 手动强制运行。
+#
+# 注意：GitHub 托管 runner 与 CNB 4 核专用节点性能不可比，首次上报会建立新的
+# testbed（gha-ubuntu-latest）基线，不要与 cnb-amd64 的历史数据混看。
+name: Fixture bench
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/**
+      - benches/**
+      - Cargo.toml
+      - Cargo.lock
+      - tests/fixtures/**
+      - tools/run-bencher-criterion-ci.mjs
+      - .github/workflows/fixture-bench.yml
+  workflow_dispatch:
+
+concurrency:
+  group: fixture-bench
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  RUST_TOOLCHAIN: 1.95.0
+  CARGO_TERM_COLOR: always
+  BENCHER_TESTBED: gha-ubuntu-latest
+
+jobs:
+  fixture-bench:
+    name: criterion fixture benches
+    if: ${{ vars.BENCHER_PROJECT != '' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    env:
+      BENCHER_API_KEY: ${{ secrets.BENCHER_API_KEY }}
+      BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
+      BENCHER_UPLOAD_REQUIRED: ${{ vars.BENCHER_UPLOAD_REQUIRED || 'false' }}
+      CNB_BRANCH: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: Swatinem/rust-cache@v2
+      - uses: bencherdev/bencher@main
+      - name: toolchain
+        run: |
+          node --version
+          rustc --version
+          cargo --version
+          bencher --version
+      # 预热：先编一遍 release-fast，避免首个 bench 把编译时间算进采样前的等待。
+      - name: criterion warmup
+        run: |
+          rm -rf target/criterion-ci/warmup-fixture target/criterion-ci/parse target/criterion-ci/query-micro
+          CARGO_TARGET_DIR=target/criterion-ci/warmup-fixture \
+            cargo build --profile release-fast --lib --bins
+      - name: criterion fixture benches
+        run: |
+          node tools/run-bencher-criterion-ci.mjs \
+            --bench parse_bench \
+            --target-dir target/criterion-ci/parse \
+            -- --sample-size 10 --warm-up-time 1 --measurement-time 2 --nresamples 1000 --noplot
+          node tools/run-bencher-criterion-ci.mjs \
+            --bench query_micro_bench \
+            --target-dir target/criterion-ci/query-micro \
+            -- --sample-size 10 --warm-up-time 1 --measurement-time 2 --nresamples 1000 --noplot
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: criterion-fixture-reports
+          path: target/criterion-ci/reports
+          if-no-files-found: warn

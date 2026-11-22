@@ -2298,6 +2298,13 @@ impl GraphWriteStore for GraphDB {
         GraphDB::remove_nodes_by_ids(self, &node_ids.to_vec());
         Ok(())
     }
+
+    fn node_type_of(&self, node_id: &str) -> GraphStoreResult<Option<crate::graph::NodeType>> {
+        Ok(self
+            .node_indices
+            .get(node_id)
+            .map(|idx| self.graph[*idx].node_type.clone()))
+    }
 }
 
 impl IndexStateStore for GraphDB {

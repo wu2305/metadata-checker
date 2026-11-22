@@ -228,6 +228,29 @@ impl RuntimeGraphBackend {
         }
     }
 
+    /// M59-3 C4：在图库上执行只读 GQL 查询。
+    ///
+    /// 只有 grafeo 后端有 GQL 引擎；redb 后端显式失败并指路，而不是退化成别的
+    /// 查询路径。只读边界的实现与取舍见 `GrafeoGraphStore::query_gql_read_only`。
+    pub fn query_gql_read_only(
+        &self,
+        query: &str,
+        max_rows: usize,
+    ) -> Result<crate::graph_store::GqlRows, crate::graph_store::GqlError> {
+        match self {
+            Self::Redb(_) => {
+                // 无 grafeo-store 的构建里这是唯一分支，参数在此显式消费。
+                let _ = (query, max_rows);
+                Err(crate::graph_store::GqlError::new(
+                    "GQL_BACKEND_UNSUPPORTED",
+                    "GQL 只支持 .grafeo 图库，当前图库是 redb；用 --build-graph 并把 --graph-db-path 指向 .grafeo 文件生成",
+                ))
+            }
+            #[cfg(feature = "grafeo-store")]
+            Self::Grafeo(store) => store.query_gql_read_only(query, max_rows),
+        }
+    }
+
     /// redb 具体化句柄：`PersistFn` 签名是 `&mut GraphDB`，diff-refresh 持久化
     /// 在 grafeo 后端上显式失败，不把写入静默导到另一套格式。
     pub fn graph_db_mut(&mut self) -> Result<&mut GraphDB> {

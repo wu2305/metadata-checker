@@ -34,6 +34,10 @@ pub struct TblMetadata {
     pub version: Option<String>,
     pub db_table_name: Option<String>,
     pub is_dataflow: bool,
+    /// 数据流显式写了空串 `dbTableName`：未落表（即时取数，没有物理输出表）。
+    /// 与「根本没写 dbTableName」区分开——后者才触发 `DATAFLOW_NO_OUTPUT`。
+    #[serde(default)]
+    pub unlanded: bool,
     pub fields: Vec<TblField>,
     pub dataflow_inputs: Vec<DataFlowInput>,
     pub dataflow_outputs: Vec<DataFlowOutput>,
@@ -101,12 +105,20 @@ pub fn parse_tbl_from_value_with_source(source: &SourceId, raw: Value) -> Result
     let props = obj
         .and_then(|o| o.get("properties"))
         .and_then(|v| v.as_object());
-    meta.db_table_name = props
-        .and_then(|p| p.get("dbTableName"))
-        .and_then(|v| v.as_str())
-        .map(String::from);
-
     meta.is_dataflow = raw.get("dataFlow").is_some();
+    // 数据流的空串是未落表（没有物理输出表），与项目扫描口径一致，按「没有」处理；
+    // 其它表类型不做这个例外。
+    let raw_db_table_name = props
+        .and_then(|p| p.get("dbTableName"))
+        .and_then(|v| v.as_str());
+    meta.unlanded = meta.is_dataflow && raw_db_table_name == Some("");
+    // 与项目扫描（`validate_table_identities`）同口径：非数据流的空输出表名是格式问题
+    if !meta.is_dataflow && raw_db_table_name == Some("") {
+        anyhow::bail!("table has an empty properties.dbTableName but is not a DataFlow");
+    }
+    meta.db_table_name = raw_db_table_name
+        .filter(|_| !meta.unlanded)
+        .map(String::from);
 
     // Table name from properties.name or source_path basename
     let basename = std::path::Path::new(&source.source_path)

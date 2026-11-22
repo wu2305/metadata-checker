@@ -129,6 +129,7 @@ impl EChartsRenderer {
                     NodeKind::Field => 15,
                     NodeKind::Condition => 16,
                     NodeKind::Diagnostic => 12,
+                    NodeKind::Script => 16,
                 };
 
                 let symbol_size = match node.depth {
@@ -280,6 +281,7 @@ impl EChartsRenderer {
             NodeKind::Action => serde_json::json!({ "color": "#73c0de" }),
             NodeKind::Condition => serde_json::json!({ "color": "#3ba272" }),
             NodeKind::Diagnostic => serde_json::json!({ "color": "#fc8452" }),
+            NodeKind::Script => serde_json::json!({ "color": "#9a60b4" }),
         }
     }
 

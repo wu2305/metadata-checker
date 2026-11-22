@@ -355,7 +355,9 @@ fn intent_edge_weights(intent: TraversalIntent, edge_type: &EdgeType) -> (f64, f
             | EdgeType::ActionControlsComponent
             | EdgeType::ActionValidates
             | EdgeType::ActionLoadsData
-            | EdgeType::DependsOn => (0.5, 0.5),
+            | EdgeType::DependsOn
+            | EdgeType::ExecutesScript
+            | EdgeType::LinksScript => (0.5, 0.5),
         },
     }
 }

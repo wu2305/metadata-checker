@@ -1,0 +1,13 @@
+{
+  "version": "4.19.7",
+  "theme": "default",
+  "params": [],
+  "sources": [],
+  "canvas": {
+    "id": "canvas",
+    "type": "canvas",
+    "components": [
+      {"id": "title", "type": "text", "value": "目标详情"}
+    ]
+  }
+}

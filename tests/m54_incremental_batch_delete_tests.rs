@@ -38,6 +38,18 @@ impl GraphWriteStore for CountingWriteStore {
         self.removed.extend(node_ids.iter().cloned());
         Ok(())
     }
+
+    fn node_type_of(
+        &self,
+        node_id: &str,
+    ) -> GraphStoreResult<Option<metadata_checker::graph::NodeType>> {
+        Ok(self
+            .nodes
+            .iter()
+            .rev()
+            .find(|node| node.id == node_id)
+            .map(|node| node.node_type.clone()))
+    }
 }
 
 /// 构造一个带 previous_node_ids 的 TBL 解析更新。
