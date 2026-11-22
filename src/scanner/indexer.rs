@@ -595,10 +595,29 @@ fn extend_dirty_with_page_referrers(
     plan.dirty.extend(extra);
 }
 
+/// 节点上是否还挂着任何边（传出/传入都算）。
+fn node_has_edges(store: &dyn IndexScanStore, node_id: &str) -> Result<bool> {
+    let neighbors = store
+        .get_node_edges(node_id)
+        .map_err(|err| anyhow!("{err}"))?;
+    Ok(neighbors.is_some_and(|views| !views.outgoing.is_empty() || !views.incoming.is_empty()))
+}
+
+/// `discovered` 是 `logical_path_of` 的原始输出，Windows 上带 `\`；节点 path
+/// 一律归一成正斜杠。比较前先把集合归一成同一口径，否则 Windows 上所有
+/// Page/`param:` 节点都会被判成无文件幽灵。
+fn normalized_discovered(discovered: &HashSet<String>) -> HashSet<String> {
+    discovered
+        .iter()
+        .map(|path| path.replace('\\', "/"))
+        .collect()
+}
+
 /// 旧语义版本留下的无文件占位节点：指纹不带当前语义版本前缀（说明这是升级后的第一次
 /// 扫描）时，找出图里路径不在本次发现文件里的 Page，以及挂在这类目标页名下的 link 参数
 /// 节点（`param:`，path 是目标页）。这些节点是旧版本为路径解析正确但文件不存在的引用
 /// 留的占位，不属于任何文件，重解析引用者也删不掉它们。
+/// `param:` 与 [`orphan_param_ids`] 同一口径：仍被边连着的（同名共享页仍引用）不能删。
 fn legacy_ghost_stub_ids(
     store: &dyn IndexScanStore,
     prev_states: &HashMap<String, FileState>,
@@ -611,13 +630,18 @@ fn legacy_ghost_stub_ids(
     {
         return Ok(Vec::new());
     }
+    let discovered = normalized_discovered(discovered);
     let mut ghosts = Vec::new();
     for node in store.iter_nodes().map_err(|err| anyhow!("{err}"))? {
-        let is_stub_kind = node.node_type == NodeType::Page
-            || (node.node_type == NodeType::Field && node.id.starts_with("param:"));
-        if is_stub_kind && !discovered.contains(&node.path.replace('\\', "/")) {
-            ghosts.push(node.id);
+        let is_page = node.node_type == NodeType::Page;
+        let is_param = node.node_type == NodeType::Field && node.id.starts_with("param:");
+        if !(is_page || is_param) || discovered.contains(&node.path.replace('\\', "/")) {
+            continue;
         }
+        if is_param && node_has_edges(store, &node.id)? {
+            continue;
+        }
+        ghosts.push(node.id);
     }
     Ok(ghosts)
 }
@@ -630,6 +654,7 @@ fn orphan_param_ids(
     store: &dyn IndexScanStore,
     discovered: &HashSet<String>,
 ) -> Result<Vec<String>> {
+    let discovered = normalized_discovered(discovered);
     let mut orphans = Vec::new();
     for node in store.iter_nodes().map_err(|err| anyhow!("{err}"))? {
         if node.node_type != NodeType::Field
@@ -638,12 +663,7 @@ fn orphan_param_ids(
         {
             continue;
         }
-        let neighbors = store
-            .get_node_edges(&node.id)
-            .map_err(|err| anyhow!("{err}"))?;
-        let has_edges =
-            neighbors.is_some_and(|views| !views.outgoing.is_empty() || !views.incoming.is_empty());
-        if !has_edges {
+        if !node_has_edges(store, &node.id)? {
             orphans.push(node.id);
         }
     }
@@ -1804,5 +1824,111 @@ impl PreparedIndexUpdate {
     /// 本轮是否为部分失败（存在已消费但未入图的源文件）。
     pub fn has_parse_failure(&self) -> bool {
         !self.parse_failures.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::{Edge, EdgeType};
+
+    fn temp_db(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("l0b-unit-{tag}-{nanos}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create dir");
+        dir.join("graph.graphdb")
+    }
+
+    fn node(id: &str, node_type: NodeType, path: &str) -> Node {
+        Node {
+            id: id.to_string(),
+            node_type,
+            path: path.to_string(),
+            name: id.to_string(),
+            meta: None,
+            origin_file: None,
+        }
+    }
+
+    /// 带一个旧语义指纹的 file states，让升级清扫分支放行。
+    fn legacy_states() -> HashMap<String, FileState> {
+        HashMap::from([(
+            "app/a.spg".to_string(),
+            FileState {
+                file_path: "app/a.spg".to_string(),
+                file_hash: "s2-legacy".to_string(),
+                mtime: 0,
+                size: 0,
+                node_ids: Vec::new(),
+            },
+        )])
+    }
+
+    /// Windows 上 `logical_path_of` 产出的 `discovered` 带 `\`；节点 path 是正斜杠
+    /// 口径。两处幽灵判定必须先归一 `discovered` 再比较，否则 Windows 上路径真实
+    /// 存在的节点也会被判成幽灵（复审 P1 返修的回归钉）。
+    #[test]
+    fn ghost_sweeps_normalize_backslash_discovered_paths() -> Result<()> {
+        let db = temp_db("normalize");
+        let mut graph = GraphDB::open(&db)?;
+        for n in [
+            node("page:app/a.spg", NodeType::Page, "app/a.spg"),
+            node("param:a/order_id", NodeType::Field, "app/a.spg"),
+        ] {
+            graph.upsert_node(n).map_err(|e| anyhow!("{e}"))?;
+        }
+        // Windows `logical_path_of` 的输出形态：同一文件、平台分隔符
+        let discovered: HashSet<String> = ["app\\a.spg".to_string()].into_iter().collect();
+        let ghosts = legacy_ghost_stub_ids(&graph, &legacy_states(), &discovered)?;
+        assert_eq!(ghosts, Vec::<String>::new());
+        let orphans = orphan_param_ids(&graph, &discovered)?;
+        assert_eq!(orphans, Vec::<String>::new());
+        drop(graph);
+        let _ = std::fs::remove_dir_all(db.parent().expect("parent"));
+        Ok(())
+    }
+
+    /// `legacy_ghost_stub_ids` 对 `param:` 与 `orphan_param_ids` 同一口径：
+    /// 路径不在发现集里但仍带着边（同名共享页仍引用）的参数节点不能清；
+    /// 真正无主的才清（复审 P2-1 返修的回归钉）。
+    #[test]
+    fn legacy_sweep_keeps_param_nodes_that_still_have_edges() -> Result<()> {
+        let db = temp_db("param-edges");
+        let mut graph = GraphDB::open(&db)?;
+        for n in [
+            node("page:app/gone.spg", NodeType::Page, "app/gone.spg"),
+            node("param:gone/order_id", NodeType::Field, "app/gone.spg"),
+            node("param:gone2/order_id", NodeType::Field, "app/gone2.spg"),
+            node("page:app/live.spg", NodeType::Page, "app/live.spg"),
+        ] {
+            graph.upsert_node(n).map_err(|e| anyhow!("{e}"))?;
+        }
+        graph
+            .add_edge(Edge {
+                from: "page:app/live.spg".to_string(),
+                to: "param:gone/order_id".to_string(),
+                edge_type: EdgeType::PassesParam,
+                field_path: None,
+                meta: None,
+                origin_file: None,
+            })
+            .map_err(|e| anyhow!("{e}"))?;
+        let discovered: HashSet<String> = ["app/live.spg".to_string()].into_iter().collect();
+        let mut ghosts = legacy_ghost_stub_ids(&graph, &legacy_states(), &discovered)?;
+        ghosts.sort();
+        assert_eq!(
+            ghosts,
+            vec![
+                "page:app/gone.spg".to_string(),
+                "param:gone2/order_id".to_string()
+            ]
+        );
+        drop(graph);
+        let _ = std::fs::remove_dir_all(db.parent().expect("parent"));
+        Ok(())
     }
 }
