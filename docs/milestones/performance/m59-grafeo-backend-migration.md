@@ -26,6 +26,34 @@ main 为 base。本节是验收计划与当前状态，不是实现或通过记�
   维护者真实语料的可达性/授权。
 - **S4：未开始。** S1–S3 未全部通过前不切默认、不退役 redb；保留回退路径。
 
+- **第一包远端 CI 验证（不等于 S1 完整通过）。** PR #51 head 为
+  <code>1e1f17226eb4e8be3a46f587d5aa1c4ff3113d83</code>；CNB branch-push
+  <code>rust-ci-branch-push</code> 在该 head 上成功（6m 4s），PR
+  <code>rust-ci</code> 在状态 SHA <code>1aca263e159054c1d6a5d609db07baaf03e16c45</code>
+  上成功（4m 41s）。两份 <code>cargo llvm-cov test --workspace</code> 日志均明确显示：
+  <code>tests/m59_grafeo_source_facts_tests.rs</code> 中
+  <code>full_and_noop_scans_match_static_source_gold_after_reopen</code> 与
+  <code>referenced_page_rewrite_matches_updated_source_gold_after_reopen</code> 均为
+  <code>ok</code>，该 target 2 passed；<code>tests/m59_c2_grafeo_import_tests.rs</code>
+  9 passed；<code>tests/scanner_missing_page_target_tests.rs</code> 8 passed。三项目标合计
+  19 passed / 0 failed / 0 ignored。Cargo.toml 的 default 同时启用
+  <code>cli-local</code> 与 <code>grafeo-store</code>，日志中的 target 执行输出证明
+  Grafeo 条件编译实际启用。PR Rust 总结为 110 个 test-result summaries、
+  1,181 passed / 0 failed / 24 ignored；branch-push Rust 总结为 106 个 summaries、
+  1,129 passed / 0 failed / 23 ignored。两条 workflow 总量不同，以上分别按各自日志记录；
+  本包目标 target 的输出一致。
+- PR 的 WASM check
+  <code>cargo check --no-default-features --features browser-wasm --target wasm32-unknown-unknown</code>
+  成功；这不是 C5 要求的实际 <code>cargo build</code> / 浏览器接入验收。PR
+  <code>browser-offscreen-bench-ci</code> 为 skipped，不是通过；本次 diff 不涉及
+  <code>src/</code>、<code>browser/</code>、Cargo manifests 或 browser-offscreen fixture，
+  符合其 <code>ifModify</code> 条件。
+- CI 日志：[PR Rust](https://cnb.cool/wu2305/metadata-checker/-/build/logs/cnb-0jh-1k81kucvb#001)、
+  [branch-push Rust](https://cnb.cool/wu2305/metadata-checker/-/build/logs/cnb-btm-1k81ktg46#001)、
+  [PR offscreen](https://cnb.cool/wu2305/metadata-checker/-/build/logs/cnb-0jh-1k81kucvb#002)。
+  这一片 source-gold 测试在 CI 已通过；origin_file / ownership、跨页局部模型隔离、
+  M59-PATH、完整事实矩阵仍阻塞 S1，S2–S4 也未通过。
+
 F3/F5/F6、Graph-first L1–L5 和 Script 摄入仍分别按承接账本 deferred / draft 跟踪，
 不得把未覆盖解释成无事实。M59-REPLAY 仍为 queued；D1 必须包含真实全量重建和图产物
 正确性。13-case 重放若被 F3/FACTS 阻塞，逐 case 留下 case id、源证据、预期事实和原因，
