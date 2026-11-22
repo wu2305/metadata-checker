@@ -1830,7 +1830,7 @@ impl PreparedIndexUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::{Edge, EdgeType};
+    use crate::graph::EdgeType;
 
     fn temp_db(tag: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
@@ -1907,16 +1907,12 @@ mod tests {
         ] {
             graph.upsert_node(n).map_err(|e| anyhow!("{e}"))?;
         }
-        graph
-            .add_edge(Edge {
-                from: "page:app/live.spg".to_string(),
-                to: "param:gone/order_id".to_string(),
-                edge_type: EdgeType::PassesParam,
-                field_path: None,
-                meta: None,
-                origin_file: None,
-            })
-            .map_err(|e| anyhow!("{e}"))?;
+        graph.add_edge(
+            "page:app/live.spg",
+            "param:gone/order_id",
+            EdgeType::PassesParam,
+            None,
+        );
         let discovered: HashSet<String> = ["app/live.spg".to_string()].into_iter().collect();
         let mut ghosts = legacy_ghost_stub_ids(&graph, &legacy_states(), &discovered)?;
         ghosts.sort();
