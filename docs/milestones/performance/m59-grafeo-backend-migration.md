@@ -4,6 +4,33 @@
 > Spec：[迁移设计](../../specs/2026-09-05-grafeo-backend-migration-design.md)（approved）
 > Plan：[实施与交接计划](../../plans/2026-09-06-m59-grafeo-implementation-plan.md)（approved）
 
+## 2026-11-22 切换前四阶段事实验收门禁（S1 启动中）
+
+本节按用户在[本会话](https://app.devin.ai/sessions/49da50eb73f74cb694eba7ae7136af82)的授权补充切换前验收状态；详细 stage acceptance 见
+[M59 实施计划的 2026-11-22 门禁](../../plans/2026-09-06-m59-grafeo-implementation-plan.md#2026-11-22-切换前四阶段事实验收门禁)。
+本包临时基于集成 tip 57aeed3990caaa9a762dfbe125d113eb2dc7ce69，PR 暂以
+codex/reconcile-github-branches 为 base 并依赖 PR #50；#50 合入后后续 PR 转以
+main 为 base。本节是验收计划与当前状态，不是实现或通过记录。
+
+- **S1：启动中。** 本包建立固定 .spg / .tbl 源夹具及 Grafeo 全量、重开、
+  no-op、被引目标页改写的独立事实断言。断言以源 JSON 为依据，不读取 redb 作为
+  expected，不用全量/增量相等代替语义检查。该 slice 核验节点路径、组件 JSON 路径、
+  关系和字段属性；不把旧兼容 API 的 origin_file=None 记作正确来源。当前 scanner 的
+  origin_file / 完整 ownership、跨页局部模型隔离、M59-PATH 和完整事实矩阵仍未通过。
+- **S2：未开始。** Grafeo project binding / ownership 入口仍 fail closed；Grafeo
+  diff-refresh 持久化、增删改恢复、重启和崩溃加源回退恢复仍需在同一 source gold 上验收。
+- **S3：未开始。** C5 实际执行
+  <code>cargo build --no-default-features --features browser-wasm --target wasm32-unknown-unknown</code>
+  并完成接入，以及 pin 真实语料的 D1（源码/fixture hash、
+  工具链、命令、语义查询和冷启动至首查、内存、产物大小）均未完成；当前环境未验证
+  维护者真实语料的可达性/授权。
+- **S4：未开始。** S1–S3 未全部通过前不切默认、不退役 redb；保留回退路径。
+
+F3/F5/F6、Graph-first L1–L5 和 Script 摄入仍分别按承接账本 deferred / draft 跟踪，
+不得把未覆盖解释成无事实。M59-REPLAY 仍为 queued；D1 必须包含真实全量重建和图产物
+正确性。13-case 重放若被 F3/FACTS 阻塞，逐 case 留下 case id、源证据、预期事实和原因，
+不得放宽 gold。M59-BASELINE 才是 deferred，另行排期，不替代 D1 正确性验收。
+
 ## M59-1 交付（2026-09-20）
 
 A1/A1b/A2 已交付，提交 `03b2336..2ff7c69`（分支 codex/m59-1-identity-grammar）：

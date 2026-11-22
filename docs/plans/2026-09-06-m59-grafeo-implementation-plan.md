@@ -84,3 +84,61 @@ style/smell 审查。PR 中分别写语义验收、测试与性能的证据范�
 当前不写 `ownership_schema_version`；早期实验库中的该 marker 一律拒载，在新路径从源重建。
 session 仍使用已发布扫描栈，不启用准备格式。重新接线必须同时交付来源账本、读写入口的
 项目绑定传递及 B5 独立预期/全量增量验收；不得仅因准备 API 测试通过就启用新页面 ID。
+
+## 2026-11-22 切换前四阶段事实验收门禁
+
+> 授权：用户在[本会话](https://app.devin.ai/sessions/49da50eb73f74cb694eba7ae7136af82)明确授权补充各阶段验收目标并开始第一包。本节补充已批准 M59
+> plan 的切换门槛，不回写历史结论，也不代表任何阶段已验收通过。
+> 临时基线：第一包从 57aeed3990caaa9a762dfbe125d113eb2dc7ce69 建功能分支，
+> PR 暂以 codex/reconcile-github-branches 为 base 并依赖 PR #50；PR #50 合入后，
+> 后续 PR 应转以 main 为 base。
+
+### S1：固定源数据的独立图事实 gold（启动中）
+
+- 以人工解释、固定版本的 .spg / .tbl 原始文件建立 gold；逐项列出完整节点
+  ID/类型/路径/名称、完整关系端点/类型/field_path、关键属性、来源位置和诊断。
+  另列负例，检查不应存在的节点/边、旧事实撤销和未知/未解析状态。
+- expected 值必须从夹具源 JSON 独立推导，不得从扫描器、redb 或另一轮图导出。
+  全量/增量相等是辅助一致性门槛，不能代替 source gold；任何正例失败不得降低断言或
+  更新快照掩盖差异。
+- 未解析引用必须能与真正无关系区分；未支持的来源或解析形态必须显式标注为未知/
+  不支持，不能把无边解释为无关系。M59-PATH 的 same_page 与物理字段来源必须按
+  源事实 gold 通过，不以旧输出替代。
+- 第一包只建立静态夹具与 Grafeo 全量/重开/no-op/目标页修改的事实验收基础。旧兼容
+  scanner 写入的 origin_file=None 不作为正确 gold；路径和 JSON 证据可先独立核验，
+  origin_file 与完整 ownership 仍为未通过门槛。S1 只有完整事实矩阵及来源门槛全过
+  才能关闭。
+
+### S2：Grafeo 归属、持久化和恢复
+
+- 在同一 S1 source gold 上接通 Grafeo 的 project binding / ownership 与持久化
+  diff-refresh；验收 project-scoped identity、来源贡献和跨页局部模型隔离。
+- 对新增、修改、删除、恢复、传递引用者重扫、关闭重开，逐项验证图事实、来源与诊断；
+  检查写入中断后源文件回退的恢复/孤儿处理。全量等于增量仍是必要辅助项，不是语义
+  正确证明。未完成时不得把 Grafeo ownership 或持久化标成已完成。
+
+### S3：WASM 接入与固定真实语料 D1
+
+- 完成 C5：在远端实际执行
+  <code>cargo build --no-default-features --features browser-wasm --target wasm32-unknown-unknown</code>，
+  并完成浏览器接入回归；沿用 C5 的 build 目标口径，不添加 <code>--lib</code>。
+  CI 中的 check 不替代实际
+  build/接入验收。
+- 固定真实语料源码 revision、语料文件清单/hash、工具链版本和完整命令；在 Grafeo 上
+  验证 source gold、关键查询、全量/增量/重开事实，并归档冷启动至首查询、RSS/峰值和
+  图产物大小。语料不可达或授权未确认时本阶段不得通过。
+
+### S4：默认切换与 redb 退役
+
+- 仅当 S1–S3 全部有可复核证据通过，才可宣布默认切换完成并执行 D2/redb 退役。
+  通过前保留 redb 回退路径；任何语义、恢复或兼容门槛失败都不能以 parity 或性能结果
+  抵销。
+
+F3/F5/F6、Graph-first L1–L5 和 Script 摄入继续按承接账本单列，不得把未覆盖解释为无事实。
+M59-REPLAY 状态为 queued；其真实全量重建与图产物正确性是 D1 必需项。13-case 重放中
+若有 F3/FACTS 阻塞，逐 case 记录 case id、源证据、预期事实和阻塞原因，不放宽 gold。
+M59-BASELINE 状态为 deferred，单独排期且不能替代 D1 正确性验收。若 deferred / draft
+事实能力属于目标图完整性范围，须显式提升为相应阶段的 gate；否则标为未支持/未知。
+
+当前状态：S1 第一包实施中；完整来源矩阵、origin_file / ownership、跨页局部模型
+隔离及 M59-PATH 尚未通过。S2–S4 均未开始/未通过。

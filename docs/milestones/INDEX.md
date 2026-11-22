@@ -75,6 +75,8 @@ CI 基线：[performance-baseline.md](performance/performance-baseline.md)（`re
 > 2026-09-08：补入 2026-07-05 的 `.dash`/`.rpt` 设计稿作为**缺口记录**（原稿在已删除分支
 > `codex/m52-redb-v2-and-ci` 上，从未合入）。稿中 M56/M57 编号已去除——那两个号归 diff-refresh 线。
 > 该 design 为 draft，**不是已批准计划**，开工需另立里程碑与 plan。
+> 2026-11-22：用户在[本会话](https://app.devin.ai/sessions/49da50eb73f74cb694eba7ae7136af82)授权增加 M59 切换前四阶段事实验收门禁；S1 源 gold 第一包启动中，
+> 尚未验收通过。详见 [M59 journal](performance/m59-grafeo-backend-migration.md#2026-11-22-切换前四阶段事实验收门禁s1-启动中)。
 
 ## 文档治理（Phase C）
 

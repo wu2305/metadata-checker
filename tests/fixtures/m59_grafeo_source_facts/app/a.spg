@@ -1,0 +1,15 @@
+{
+  "version": "4.19.7",
+  "theme": "default",
+  "params": [],
+  "referenceResources": ["b.spg"],
+  "sources": [],
+  "canvas": {
+    "id": "canvas",
+    "type": "canvas",
+    "components": [
+      {"id": "embed_b", "type": "embedsuperpage", "resPath": "0"},
+      {"id": "label_a", "type": "text", "value": "A"}
+    ]
+  }
+}
