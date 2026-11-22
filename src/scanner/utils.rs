@@ -113,6 +113,9 @@ pub enum ReferenceUnresolved {
     EscapesRoot { reference: String },
     /// 目标不是 `.spg` 页面（`.rpt`、`.action`、`.docx` 等），图里没有对应的页面节点
     NotAPage { target: String },
+    /// 路径解析正确，但本次扫描发现的文件里没有这个页面：磁盘上没有这个文件，
+    /// 图里不能为它留一个没有文件的 Page 节点。
+    TargetMissing { target: String },
 }
 
 impl std::fmt::Display for ReferenceUnresolved {
@@ -148,6 +151,9 @@ impl std::fmt::Display for ReferenceUnresolved {
             }
             Self::NotAPage { target } => {
                 write!(f, "reference target is not a .spg page: {target}")
+            }
+            Self::TargetMissing { target } => {
+                write!(f, "reference target page does not exist: {target}")
             }
         }
     }
@@ -313,6 +319,33 @@ fn join_root_sibling(root_segments: &[&str], name: &str) -> String {
     }
 }
 
+/// 本次扫描发现的 `.spg` 页面集合：判定「路径解析正确的引用，目标文件在不在」。
+///
+/// 成员是项目内逻辑路径（正斜杠，与 [`resolve_reference_target`] 的结果同口径）。
+/// 判定用本次发现的文件集合，而不是图里已有的节点——图里的 Page 节点可能是旧版本
+/// 留下的占位，不能拿来证明文件存在。
+#[derive(Debug, Default, Clone)]
+pub struct PageCatalog {
+    pages: std::collections::HashSet<String>,
+}
+
+impl PageCatalog {
+    /// 由逻辑路径构造，只收 `.spg`；反斜杠归一为正斜杠。
+    pub fn from_logical_paths<'a>(paths: impl IntoIterator<Item = &'a str>) -> Self {
+        let pages = paths
+            .into_iter()
+            .map(|path| path.replace('\\', "/"))
+            .filter(|path| path.ends_with(".spg"))
+            .collect();
+        Self { pages }
+    }
+
+    /// 目标页面文件是否在本次发现的文件里。
+    pub fn contains(&self, logical_path: &str) -> bool {
+        self.pages.contains(logical_path)
+    }
+}
+
 /// 按 `referenceResources` 下标取引用并解析为页面路径，见 [`resolve_reference_target`]。
 pub fn resolve_reference_path(
     rel_path: &str,
@@ -327,4 +360,24 @@ pub fn resolve_reference_path(
                 len: reference_resources.len(),
             })?;
     resolve_reference_target(rel_path, reference)
+}
+
+/// 同 [`resolve_reference_path`]，但给了 `catalog` 时还要求目标页面文件存在：
+/// 路径解析正确而文件不存在返回 [`ReferenceUnresolved::TargetMissing`]。
+///
+/// `catalog` 为 `None` 表示调用方没有文件集合（单文件处理），不检查存在性。
+/// 建边与诊断都经由本函数，保证「哪些引用建边」与「哪些引用记诊断」同一口径。
+pub fn resolve_reference_path_in(
+    rel_path: &str,
+    ref_idx: usize,
+    reference_resources: &[String],
+    catalog: Option<&PageCatalog>,
+) -> Result<String, ReferenceUnresolved> {
+    let target = resolve_reference_path(rel_path, ref_idx, reference_resources)?;
+    match catalog {
+        Some(catalog) if !catalog.contains(&target) => {
+            Err(ReferenceUnresolved::TargetMissing { target })
+        }
+        _ => Ok(target),
+    }
 }

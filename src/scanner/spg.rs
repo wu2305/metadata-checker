@@ -1,5 +1,6 @@
 use super::{
-    ReferenceUnresolved, add_edge_with_meta, add_identified_node, add_node, resolve_reference_path,
+    PageCatalog, ReferenceUnresolved, add_edge_with_meta, add_identified_node, add_node,
+    resolve_reference_path_in,
 };
 use crate::graph::{EdgeType, NodeType};
 use crate::graph_store::GraphWriteStore;
@@ -214,6 +215,7 @@ fn page_reference_sites(
 pub(crate) fn scan_page_reference_failures(
     value: &serde_json::Value,
     logical_path: &str,
+    catalog: Option<&PageCatalog>,
     diags: &mut ScanDiagnostics,
 ) -> Result<()> {
     let meta = crate::superpage::parse_superpage_from_value(value.clone())
@@ -227,7 +229,12 @@ pub(crate) fn scan_page_reference_failures(
             Some(text) => match text.parse::<usize>() {
                 Ok(index) => (
                     format!("referenceResources[{index}]"),
-                    resolve_reference_path(logical_path, index, &meta.reference_resources),
+                    resolve_reference_path_in(
+                        logical_path,
+                        index,
+                        &meta.reference_resources,
+                        catalog,
+                    ),
                 ),
                 Err(_) => (
                     // 下标本身不是数字：位置只能指向持有它的节点
@@ -238,6 +245,14 @@ pub(crate) fn scan_page_reference_failures(
                 ),
             },
         };
+        // 路径解析正确的引用（不论目标文件在不在）都记下目标：增量扫描靠它找出
+        // 「目标页面出现、消失或改动」时需要重解析的引用者。
+        match &outcome {
+            Ok(target) | Err(ReferenceUnresolved::TargetMissing { target }) => {
+                diags.referenced_pages.insert(target.clone());
+            }
+            Err(_) => {}
+        }
         if let Err(reason) = outcome {
             diags.record_unresolved_reference(
                 crate::output::Location {
@@ -289,6 +304,9 @@ pub(crate) struct ScanDiagnostics {
     pub(crate) parse_failed: usize,
     /// 跨页引用解析不到 `.spg` 页面的次数（只在 `scan_page_reference_failures` 里产出）。
     pub(crate) unresolved_reference: usize,
+    /// 本文件里路径解析正确的跨页引用目标（含文件不存在的），只在
+    /// `scan_page_reference_failures` 里产出，供增量扫描反查引用者。
+    pub(crate) referenced_pages: std::collections::BTreeSet<String>,
     pub(crate) sample_unrecognized_location: Option<crate::output::Location>,
     pub(crate) sample_duplicate_location: Option<crate::output::Location>,
     pub(crate) sample_parse_failed_location: Option<crate::output::Location>,
@@ -1013,6 +1031,22 @@ pub fn process_spg_file_with_schema(
     identity_mode: PageIdentityMode,
     schema: &crate::graph_schema::GraphSchema,
 ) -> Result<Vec<String>> {
+    process_spg_file_in_catalog(graph, rel_path, raw_value, identity_mode, schema, None)
+}
+
+/// 同 [`process_spg_file_with_schema`]，另给出本次扫描发现的页面集合 `catalog`。
+///
+/// 给了集合时，路径解析正确但目标文件不在集合里的跨页引用不建边、不造 Page 节点
+/// （诊断见 [`scan_page_reference_failures`]）；`None` 表示调用方没有文件集合（单文件处理），
+/// 不检查目标存在性。项目扫描一律传集合。
+pub fn process_spg_file_in_catalog(
+    graph: &mut dyn GraphWriteStore,
+    rel_path: &str,
+    raw_value: serde_json::Value,
+    identity_mode: PageIdentityMode,
+    schema: &crate::graph_schema::GraphSchema,
+    catalog: Option<&PageCatalog>,
+) -> Result<Vec<String>> {
     let mut guard = SchemaGuard::with_schema(graph, schema, rel_path);
     // 遮蔽入参：下面的函数体原样使用 `graph`，写入全部经过守卫
     let graph: &mut dyn GraphWriteStore = &mut guard;
@@ -1548,7 +1582,7 @@ pub fn process_spg_file_with_schema(
         if let Some(ref res_path_str) = comp.res_path
             && let Ok(ref_idx) = res_path_str.parse::<usize>()
             && let Ok(target_rel) =
-                resolve_reference_path(rel_path, ref_idx, &meta.reference_resources)
+                resolve_reference_path_in(rel_path, ref_idx, &meta.reference_resources, catalog)
         {
             let target_name = Path::new(&target_rel)
                 .file_stem()
@@ -1729,8 +1763,13 @@ pub fn process_spg_file_with_schema(
                             .as_deref()
                             .and_then(|path_str| path_str.parse::<usize>().ok())
                             .and_then(|ref_idx| {
-                                resolve_reference_path(rel_path, ref_idx, &meta.reference_resources)
-                                    .ok()
+                                resolve_reference_path_in(
+                                    rel_path,
+                                    ref_idx,
+                                    &meta.reference_resources,
+                                    catalog,
+                                )
+                                .ok()
                             });
                         let target_name = resolved_target.as_ref().map(|target_rel| {
                             Path::new(target_rel)
