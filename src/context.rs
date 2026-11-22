@@ -15,10 +15,15 @@ fn generate_next_queries(
     node_type: &crate::graph::NodeType,
     depth: usize,
 ) -> Vec<String> {
-    let mut queries = vec![format_next_query(
-        "--explain {} for semantic summary",
-        node_id,
-    )];
+    // `--explain` 不解读 Script 节点（直接报错并指向 `--gql`），所以不把它当后续查询推荐。
+    let mut queries = if matches!(node_type, crate::graph::NodeType::Script) {
+        Vec::new()
+    } else {
+        vec![format_next_query(
+            "--explain {} for semantic summary",
+            node_id,
+        )]
+    };
     match node_type {
         crate::graph::NodeType::Component
         | crate::graph::NodeType::Action
@@ -38,6 +43,8 @@ fn generate_next_queries(
                 }
             }
         }
+        // 脚本节点没有页面/模型级的后续查询；用 `--gql` 查指向它的边
+        crate::graph::NodeType::Script => {}
         crate::graph::NodeType::Model | crate::graph::NodeType::Field => {
             if node_id.starts_with("field:") {
                 if let Some(model_part) = node_id

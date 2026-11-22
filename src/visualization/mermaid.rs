@@ -156,6 +156,7 @@ impl MermaidRenderer {
             NodeKind::Action => format!("{}>{{\"{}\"}}]", id, label),
             NodeKind::Condition => format!("{}{{\"{}\"}}", id, label),
             NodeKind::Diagnostic => format!("{}[\"{}\"]", id, label),
+            NodeKind::Script => format!("{}[/\"{}\"/]", id, label),
             NodeKind::Component => format!("{}[\"{}\"]", id, label),
         }
     }

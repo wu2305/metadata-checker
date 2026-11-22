@@ -142,6 +142,20 @@ An expression with a semantic role: a component's exp / visibleCondition / disab
   - `referenced_symbols` (array, always present): Array of symbols (model:..., component:..., param:...) the expression references.
 - notes: Model filter clauses are Condition nodes owned by the model (json_path starts with sources[...].filter); read raw_expr for the filter fields.
 
+### Script
+
+A script file: a backend Nashorn script (<name>.action.ts) or a project's frontend custom.ts. The <name>.action file next to a backend script is its compiled copy and has no node.
+
+- id: script:<project-relative path of the script source file>
+- path: The script source file path (<name>.action.ts or custom.ts), the same project-relative path the id carries. Scripts are listed from files that were scanned, so a Script node is backed by a file (unlike a Page node created from a link target).
+- meta keys:
+  - `kind` (string, always present): backend (<name>.action.ts, Nashorn) or frontend (custom.ts).
+  - `content_hash` (string, always present): Hash of the script text (xxh64, hex). A later analysis pins itself to this value; it changes whenever the script text changes.
+  - `entry_names` (array): Frontend only: sorted names of the functions the file exposes to pages (the keys of every CustomActions map in it). Names only, no code.
+  - `bindings` (object): Frontend only: the page bindings declared in the file, as { page key: [function names] }. The page key is a bare file name or an absolute path exactly as written in the file's CustomJS map.
+  - `imports` (array): Backend only: the import specifiers that are project paths, as written, in source order.
+- notes: Registered ahead of the scan: today no Script node and no ExecutesScript / LinksScript edge is written, so their absence says nothing about the project. Once ingestion lands the scan will list scripts and link them, but it will not read what a script does; a script with no further edges is then still not known to be free of side effects.
+
 ## Edge types
 
 ### Contains
@@ -493,6 +507,18 @@ Declared in the enum, never written by the scanner. Dataflow internals live in t
 
 - emitted by the scanner: no
 
+### ExecutesScript
+
+Declared in the enum, not yet written by the scanner. It will link a page script action to the frontend custom.ts bound to its page.
+
+- emitted by the scanner: no
+
+### LinksScript
+
+Declared in the enum, not yet written by the scanner. It will link a table dataflow Script node, a page webAPI action or a script import to a backend script.
+
+- emitted by the scanner: no
+
 ## Interpretation rules
 
 - **static-only**: The graph holds static metadata only. Runtime facts (whether a parameter is actually passed, whether a table has rows, what a user sees right now) cannot be read from it. Say 'cannot be determined from the graph' instead of guessing.
@@ -505,6 +531,7 @@ Declared in the enum, never written by the scanner. Dataflow internals live in t
 - **field-nodes-include-symbols**: Field nodes include page parameters (param:), user properties (user:) and system variables (system:), not only table fields (field:). The id prefix tells them apart and is authoritative; meta.kind is set only on nodes created from an expression or condition, so a parameter created only by a link or setParamValue action has no meta.
 - **field-path-varies**: r.field_path does not mean the same thing on every edge type: usually <model>.<field>, but an expression on PassesParam / ActionSetsParam, a page path on ActionNavigates / EmbedsPage, a table path on DataflowInput / DataflowOutput. See each edge type's field_path_meaning.
 - **model-filters-are-conditions**: Filters configured on a model are Condition nodes owned by that model (DependsOn edge with meta.operation = Conditions, json_path starting with sources[...].filter). Read their raw_expr for the filter fields and values.
+- **scripts-are-listed-not-read**: Script nodes and their ExecutesScript / LinksScript edges say that a script exists and who points at it. Nothing in the scan says what a script reads, writes or changes: a script without further edges is not known to be harmless, and a page whose script action is bound may still have its components changed at run time.
 
 ## Example queries
 

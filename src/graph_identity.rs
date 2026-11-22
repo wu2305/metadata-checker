@@ -270,7 +270,7 @@ pub fn id_shape_problem(id: &str) -> Option<&'static str> {
     }
     let pipes = rest.bytes().filter(|byte| *byte == b'|').count();
     match kind {
-        "page" | "user" | "system" if pipes != 0 => Some("该类型的 id 不应含 `|`"),
+        "page" | "user" | "system" | "script" if pipes != 0 => Some("该类型的 id 不应含 `|`"),
         "comp" if pipes != 1 => Some("应为 `<页面>|<组件 id>` 两段"),
         "action" if pipes != 2 => Some("应为 `<页面>|<组件 id>|<动作 id>` 三段"),
         "cond" if pipes != 1 => Some("应为 `<页面>|<条件局部名>` 两段"),
@@ -298,9 +298,26 @@ pub fn id_shape_problem(id: &str) -> Option<&'static str> {
         "user" if !has_inner_separator(rest, b'.') => {
             Some("应为 `<命名空间>.<名字>`（`.` 两侧都非空）")
         }
+        // `script:<项目相对路径>`：归一化的相对路径，且是脚本源文件（`<名>.action.ts` 或
+        // `custom.ts`），编译副本 `<名>.action` 不是节点；否则按路径做的链接匹配不上
+        "script" => script_path_problem(rest),
         "page" | "user" | "system" | "comp" | "action" | "model" | "param" => None,
         _ => Some("未知的 kind 前缀"),
     }
+}
+
+fn script_path_problem(path: &str) -> Option<&'static str> {
+    match normalize_project_path(path) {
+        Ok(normalized) if normalized == path => {}
+        _ => return Some("应为归一化的项目相对路径（不含 `..`、`.`、空段、前导 `/`）"),
+    }
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let is_source =
+        name == "custom.ts" || (name.len() > ".action.ts".len() && name.ends_with(".action.ts"));
+    if !is_source {
+        return Some("应为脚本源文件路径（`<名>.action.ts` 或 `custom.ts`）");
+    }
+    None
 }
 
 /// 条件 id 的局部名（`|` 之后的部分）。**从右往左**认固定后缀，属主部分不设限：
